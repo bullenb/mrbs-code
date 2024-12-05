@@ -374,6 +374,19 @@ var Table = {
       el.css('clip-path', path);
     },
 
+  scrollContainerBy: function(xCoord, yCoord) {
+    var container = $(Table.selector).parent();
+    <?php
+    // If we use 'smooth' behavior then the code has to be more complicated
+    // in order to prevent another mousemove set of actions being triggered
+    // before the scrolling has completed.
+    ?>
+    container[0].scrollBy({
+      top: yCoord,
+      left: xCoord,
+      behavior: 'instant'
+    });
+  },
 
   size: function() {
       <?php // Don't do anything if this is the all-rooms week view ?>
@@ -485,147 +498,266 @@ var Table = {
         });
     }, <?php // size() ?>
 
+
   <?php
-  // Given the jQuery object 'obj', snap the side specified (can be 'left', 'right', 'top'
-  // or 'bottom') to the nearest grid line, if the side is within the snapping range.
+  // Given an object 'obj', calculate the changes that must be made to its position,
+  // width and height to snap the side 'side' to the grid. ('side' can be 'left',
+  // 'right', 'top' or 'bottom'.)  If 'force' is true, then the side is snapped regardless
+  // of where it is.
   //
-  // If force is true, then the side is snapped regardless of where it is.
-  //
-  // We have to provide our own snapToGrid function instead of using the grid
-  // option in the jQuery UI resize widget because our table may not have uniform
-  // row heights and column widths - so we can't specify a grid in terms of a simple
-  // array as required by the resize widget.
+  // Returns an object with properties 'top', 'left', 'width' and 'height'.
   ?>
-  snapToGrid: function (obj, side, force) {
-      var snapGap = 35, <?php // px ?>
+  snapDelta: function (obj, side, force) {
+    <?php // Check the side argument is valid ?>
+    if (!['top', 'left', 'bottom', 'right'].includes(side))
+    {
+      throw new Error("Invalid argument '" + side + "' for parameter side.")
+    }
+
+    <?php // Initialise the result object.  By default, no change. ?>
+    let result = {
+      top: 0,
+      left: 0,
+      width: 0,
+      height: 0
+    };
+
+    const snapGap = 35, <?php // px ?>
           tolerance = 2, <?php // px ?>
           isLR = (side === 'left') || (side === 'right'),
-          data = (isLR) ? Table.grid.x.data : Table.grid.y.data,
-          topLeft, bottomRight, gap, gapTopLeft, gapBottomRight;
+          data = (isLR) ? Table.grid.x.data : Table.grid.y.data;
 
-      var rectangle = obj.offset();
-          rectangle.bottom = rectangle.top + obj.innerHeight();
-          rectangle.right = rectangle.left + obj.innerWidth();
+    let topLeft, bottomRight, gap, gapTopLeft, gapBottomRight;
 
-      var outerWidth = rectangle.right - rectangle.left,
+    let rectangle = obj.offset();
+        rectangle.bottom = rectangle.top + obj.innerHeight();
+        rectangle.right = rectangle.left + obj.innerWidth();
+
+    const outerWidth = rectangle.right - rectangle.left,
           outerHeight = rectangle.bottom - rectangle.top,
           thisCoord = rectangle[side];
 
-      for (var i=0; i<(data.length -1); i++)
+    for (let i=0; i<(data.length -1); i++)
+    {
+      topLeft = data[i].coord;
+      bottomRight = data[i+1].coord;
+      <?php
+      // Allow for the borders: .offset() includes borders.
+      ?>
+      if (side === 'left')
       {
-        topLeft = data[i].coord;
-        bottomRight = data[i+1].coord;
+        topLeft += Table.borderLeftWidth;
+        bottomRight += Table.borderLeftWidth;
+      }
+      else if (side === 'top')
+      {
+        topLeft += Table.borderTopWidth;
+        bottomRight += Table.borderTopWidth;
+      }
+
+      gapTopLeft = thisCoord - topLeft;
+      gapBottomRight = bottomRight - thisCoord;
+
+      if (((gapTopLeft > 0) && (gapBottomRight > 0)) ||
+          <?php // containment tests ?>
+          ((i === 0) && (gapTopLeft < 0)) ||
+          ((i === (data.length-2)) && (gapBottomRight < 0)) )
+      {
+        gap = bottomRight - topLeft;
+
         <?php
-        // Allow for the borders: .offset() includes borders.
+        // If we're forcing to the top or left side, or else the gap
+        // to the top or left side is within snapping distance ...
         ?>
-        if (side === 'left')
+        if ((force && ((side === 'top') || (side === 'left'))) ||
+            (!force && (gapTopLeft <= gap/2) && (gapTopLeft < snapGap)))
         {
-          topLeft += Table.borderLeftWidth;
-          bottomRight += Table.borderLeftWidth;
-        }
-        else if (side === 'top')
-        {
-          topLeft += Table.borderTopWidth;
-          bottomRight += Table.borderTopWidth;
-        }
-
-        gapTopLeft = thisCoord - topLeft;
-        gapBottomRight = bottomRight - thisCoord;
-
-        if (((gapTopLeft > 0) && (gapBottomRight > 0)) ||
-            <?php // containment tests ?>
-            ((i === 0) && (gapTopLeft < 0)) ||
-            ((i === (data.length-2)) && (gapBottomRight < 0)) )
-        {
-          gap = bottomRight - topLeft;
-
-          if ((gapTopLeft <= gap/2) && (force || (gapTopLeft < snapGap)))
+          switch (side)
           {
-            switch (side)
-            {
-              case 'left':
-                obj.offset({top: rectangle.top, left: topLeft});
-                obj.outerWidth(outerWidth + gapTopLeft);
-                break;
+            case 'top':
+              result.top = topLeft - rectangle.top;
+              result.height = gapTopLeft;
+              break;
 
-              case 'right':
-                <?php // Don't let the width become zero. ?>
-                if ((outerWidth - gapTopLeft) < tolerance)
-                {
-                  obj.outerWidth(outerWidth + gapBottomRight);
-                }
-                else
-                {
-                  obj.outerWidth(outerWidth - gapTopLeft);
-                }
-                break;
+            case 'left':
+              result.left = topLeft - rectangle.left;
+              result.width = gapTopLeft;
+              break;
 
-              case 'top':
-                obj.offset({top: topLeft, left: rectangle.left});
-                obj.outerHeight(outerHeight + gapTopLeft);
-                break;
+            case 'bottom':
+              <?php // Don't let the height become zero. ?>
+              if ((outerHeight - gapTopLeft) < tolerance)
+              {
+                result.height = gapBottomRight;
+              }
+              else
+              {
+                result.height = -gapTopLeft;
+              }
+              break;
 
-              case 'bottom':
-                <?php // Don't let the height become zero. ?>
-                if ((outerHeight - gapTopLeft) < tolerance)
-                {
-                  obj.outerHeight(outerHeight + gapBottomRight);
-                }
-                else
-                {
-                  obj.outerHeight(outerHeight - gapTopLeft);
-                }
-                break;
-            }
-            return;
+            case 'right':
+              <?php // Don't let the width become zero. ?>
+              if ((outerWidth - gapTopLeft) < tolerance)
+              {
+                result.width = gapBottomRight;
+              }
+              else
+              {
+                result.width = -gapTopLeft;
+              }
+              break;
           }
-          else if ((gapBottomRight <= gap/2) && (force || (gapBottomRight < snapGap)))
-          {
-            switch (side)
-            {
-              case 'left':
-                <?php // Don't let the width become zero.  ?>
-                if ((outerWidth - gapBottomRight) < tolerance)
-                {
-                  obj.offset({top: rectangle.top, left: topLeft});
-                  obj.outerWidth(outerWidth + gapTopLeft);
-                }
-                else
-                {
-                  obj.offset({top: rectangle.top, left: bottomRight});
-                  obj.outerWidth(outerWidth - gapBottomRight);
-                }
-                break;
-
-              case 'right':
-                obj.outerWidth(outerWidth + gapBottomRight);
-                break;
-
-              case 'top':
-                <?php // Don't let the height become zero.  ?>
-                if ((outerHeight - gapBottomRight) < tolerance)
-                {
-                  obj.offset({top: topLeft, left: rectangle.left});
-                  obj.outerHeight(outerHeight + gapTopLeft);
-                }
-                else
-                {
-                  obj.offset({top: bottomRight, left: rectangle.left});
-                  obj.outerHeight(outerHeight - gapBottomRight);
-                }
-                break;
-
-              case 'bottom':
-                obj.outerHeight(outerHeight + gapBottomRight);
-                break;
-            }
-            return;
-          }
+          return result;
         }
-      }  <?php // for ?>
-    }  <?php // snapToGrid() ?>
+
+        <?php
+        // If we're forcing to the bottom or right side, or else the gap
+        // to the bottom or right side is within snapping distance ...
+        ?>
+        if ((force && ((side === 'bottom') || (side === 'right'))) ||
+            (!force && (gapBottomRight <= gap/2) && (gapBottomRight < snapGap)))
+        {
+          switch (side)
+          {
+            case 'top':
+              <?php // Don't let the height become zero.  ?>
+              if ((outerHeight - gapBottomRight) < tolerance)
+              {
+                result.top = topLeft - rectangle.top;
+                result.height = gapTopLeft;
+              }
+              else
+              {
+                result.top = bottomRight - rectangle.top;
+                result.height = -gapBottomRight;
+              }
+              break;
+
+            case 'left':
+              <?php // Don't let the width become zero.  ?>
+              if ((outerWidth - gapBottomRight) < tolerance)
+              {
+                result.left = topLeft - rectangle.left;
+                result.width = gapTopLeft;
+              }
+              else
+              {
+                result.left = bottomRight - rectangle.left;
+                result.width = -gapBottomRight;
+              }
+              break;
+
+            case 'bottom':
+              result.height = gapBottomRight;
+              break;
+
+            case 'right':
+              result.width = gapBottomRight;
+              break;
+          }
+          return result;
+        }
+      }
+    }  <?php // for ?>
+
+    return result;
+  },  <?php // snapDelta() ?>
+
+
+  <?php
+  // Given the jQuery object 'obj', snap the side specified (can be 'left', 'right', 'top'
+  // or 'bottom') to the nearest grid line, if the side is within the snapping range.
+  // If force is true, then the side is snapped regardless of where it is.
+  ?>
+  snapToGrid: function (obj, side, force) {
+      <?php
+      // Get the changes that must be made to the object and apply them as necessary.
+      ?>
+      const delta = this.snapDelta(obj, side, force);
+
+      if ((delta.top !== 0) || (delta.left !==0))
+      {
+        const offset = obj.offset();
+        obj.offset({top: offset.top + delta.top, left: offset.left + delta.left});
+      }
+
+      if (delta.width !== 0)
+      {
+        obj.outerWidth(obj.outerWidth() + delta.width);
+      }
+
+      if (delta.height !== 0)
+      {
+        obj.outerHeight(obj.outerHeight() + delta.height);
+      }
+
+    },  <?php // snapToGrid() ?>
+
+
+  <?php
+  // Snap a jQuery UI object to the grid.  Snap the side specified (can be 'left', 'right',
+  // 'top' or 'bottom') to the nearest grid line, if the side is within the snapping range.
+  // If force is true, then the side is snapped regardless of where it is.
+  //
+  // We have to provide our own snapUiToGrid function instead of using the grid
+  // option in the jQuery UI resize widget because our table may not have uniform
+  // row heights and column widths - either because overflow: hidden isn't being
+  // used, or just because of the way the browser lays out the table - so we can't
+  // specify a grid in terms of a simple array as required by the resize widget.
+  ?>
+  snapUiToGrid: function (ui, side, force) {
+    <?php
+    // The object ui.element is only altered when the resize stops, so we can only
+    // get its current position and size using ui.position and ui.size. We therefore
+    // create a new element in the DOM and give it the same position and size as
+    // ui.element and pass that object to snapDelta().  (We could of course modify
+    // snapDelta() so that it takes position and size as parameters instead of an object.)
+    ?>
+    const obj = $('<div></div>')
+      .css('position', 'absolute')
+      .appendTo($('body'))
+      .offset(ui.position)
+      .width(ui.size.width)
+      .height(ui.size.height);
+
+    <?php
+    // Get the changes that must be made to the UI element and apply them by updating
+    // ui.position and ui.size.  The Helper element will automatically follow the
+    // new position and size.
+    ?>
+    const delta = this.snapDelta(obj, side, force);
+
+    ui.position.top += delta.top;
+    ui.position.left += delta.left;
+    ui.size.width += delta.width;
+    ui.size.height += delta.height;
+
+    <?php // Remove the object we've created so it doesn't clutter the DOM. ?>
+    obj.remove();
+  }
 
 };
+
+
+<?php
+// Add scroll positions, if any, of a jQuery object to the location.
+// This enables the scroll position to be preserved after a booking
+// has been made.
+?>
+function addScrollPosition(location, object)
+{
+  if (object.isHScrollable())
+  {
+    location += '&left=' + encodeURIComponent(object.scrollLeft());
+  }
+  if (object.isVScrollable())
+  {
+    location += '&top=' + encodeURIComponent(object.scrollTop());
+  }
+
+  return location;
+}
 
 
 $(document).on('page_ready', function() {
@@ -655,6 +787,23 @@ $(document).on('page_ready', function() {
   ?>
   $(Table.selector).on('tableload', function() {
       var table = $(this);
+      var tableContainer = table.parent();
+      var thead = table.find('thead');
+      var tfoot = table.find('tfoot');
+      var tfootHeight = (tfoot.length) ? tfoot.outerHeight() : 0;
+      var tbodyFirstRowTh = table.find('tbody tr:first th');
+      var tbodyRightTh = tbodyFirstRowTh.eq(2);
+      var tbodyRightThWidth = (tbodyRightTh.length) ? tbodyRightTh.outerWidth() : 0;
+      <?php
+      // Get the boundaries of the visible part of the tbody. We will need them to decide
+      // whether we need to scroll.
+      ?>
+      var tbodyViewport = {
+        top: tableContainer.offset().top + thead.outerHeight(),
+        left: tableContainer.offset().left + tbodyFirstRowTh.first().outerWidth(),
+        bottom: tableContainer.offset().top + tableContainer.outerHeight() - tfootHeight,
+        right: tableContainer.offset().left + tableContainer.outerWidth() - tbodyRightThWidth
+      };
 
       <?php
       // Don't do anything if this is an empty table, or the all-rooms week view,
@@ -687,8 +836,10 @@ $(document).on('page_ready', function() {
           {
             jqTarget = jqTarget.parent();
           }
+
           downHandler.origin = jqTarget.offset();
           downHandler.firstPosition = {x: e.pageX, y: e.pageY};
+
           <?php
           // Get the original link in case we need it later.    We can't be sure whether
           // the target was the <a> or the <td> so play safe and get all possibilities
@@ -711,26 +862,24 @@ $(document).on('page_ready', function() {
               {
                 ?>
                 var slotHeight = jqTarget.outerHeight();
-                downHandler.maxHeight = true;
+                downHandler.maxHeightSet = true;
                 downHandler.box.css('max-height', slotHeight + 'px');
-                downHandler.box.css('min-height', slotHeight + 'px');
                 <?php
               }
               else
               {
                 ?>
                 var slotWidth = jqTarget.outerWidth();
-                downHandler.maxWidth = true;
+                downHandler.maxWidthSet = true;
                 downHandler.box.css('max-width', slotWidth + 'px');
-                downHandler.box.css('min-width', slotWidth + 'px');
                 <?php
               }
               ?>
             }
           }
 
-          <?php // Attach the element to the document before setting the offset ?>
-          $(document.body).append(downHandler.box);
+          <?php // Attach the element to the table container before setting the offset ?>
+          tableContainer.append(downHandler.box);
           downHandler.box.offset(downHandler.origin);
         };
 
@@ -739,42 +888,129 @@ $(document).on('page_ready', function() {
           var oldBoxOffset = box.offset();
           var oldBoxWidth = box.outerWidth();
           var oldBoxHeight = box.outerHeight();
+          <?php
+          // Set the distance from the edge of the visible tbody at which we should start scrolling.
+          // It should not be more than half the height/width of the visible tbody
+          ?>
+          var scrollGapX = Math.min(30, Math.floor((tbodyViewport.right - tbodyViewport.left)/2));
+          var scrollGapY = Math.min(30, Math.floor((tbodyViewport.bottom - tbodyViewport.top)/2));
+          var xDelta = 0,
+              yDelta = 0;
 
           <?php
           // Check to see if we're only allowed to go one slot wide/high
           // and have gone over that limit.  If so, do nothing and return
           ?>
-          if ((downHandler.maxWidth && (e.pageX < downHandler.origin.left)) ||
-              (downHandler.maxHeight && (e.pageY < downHandler.origin.top)))
+          if ((downHandler.maxWidthSet && (e.pageX < downHandler.origin.left)) ||
+              (downHandler.maxHeightSet && (e.pageY < downHandler.origin.top)))
           {
             return;
           }
-          <?php // Otherwise redraw the box ?>
-          if (e.pageX < downHandler.origin.left)
+
+          <?php
+          // Scroll the table if necessary.
+          // First check whether we are approaching the top.
+          ?>
+          if ((e.pageY - tbodyViewport.top) < scrollGapY)
           {
-            if (e.pageY < downHandler.origin.top)
+            <?php // Don't go beyond the top ?>
+            yDelta = -Math.min(scrollGapY, tableContainer.scrollTop());
+          }
+
+          <?php
+          // Then whether we are approaching the bottom.
+          ?>
+          else if ((tbodyViewport.bottom - e.pageY) < scrollGapY)
+          {
+            <?php // Don't go beyond the bottom ?>
+            yDelta = Math.min(scrollGapY, table.outerHeight() - tableContainer.outerHeight() - tableContainer.scrollTop());
+            yDelta = Math.max(yDelta, 0);
+            <?php
+            // In Chrome, when the browser is zoomed the pixel numbers can be floating, so round down anything less than 1.
+            // See https://stackoverflow.com/questions/5828275/how-to-check-if-a-div-is-scrolled-all-the-way-to-the-bottom-with-jquery
+            ?>
+            if (yDelta < 1)
+            {
+              yDelta = 0;
+            }
+          }
+
+          <?php // Then the left hand side ?>
+          if ((e.pageX - tbodyViewport.left) < scrollGapX)
+          {
+            <?php // Don't go beyond the left hand side ?>
+            xDelta = -Math.min(scrollGapX, tableContainer.scrollLeft());
+          }
+
+          <?php // And finally the right ?>
+          else if ((tbodyViewport.right - e.pageX) < scrollGapX)
+          {
+            <?php // Don't go beyond the bottom ?>
+            xDelta = Math.min(scrollGapX, table.outerWidth() - tableContainer.outerWidth() - tableContainer.scrollLeft());
+            xDelta = Math.max(xDelta, 0);
+            <?php
+            // In Chrome, when the browser is zoomed the pixel numbers can be floating, so round down anything less than 1.
+            // See https://stackoverflow.com/questions/5828275/how-to-check-if-a-div-is-scrolled-all-the-way-to-the-bottom-with-jquery
+            ?>
+            if (xDelta < 1)
+            {
+              xDelta = 0;
+            }
+          }
+
+          if (xDelta || yDelta)
+          {
+            Table.scrollContainerBy(xDelta, yDelta);
+            <?php
+            // Need to resize the table after a scroll because the coordinates
+            // of the grid lines and booked cells will have changed.
+            // TODO: Optimise performance by just recording the cumulative x- and
+            // TODO: y-deltas and then use those in snapToGrid() etc.?
+            ?>
+            Table.size();
+            <?php
+            // Because we've scrolled we need to correct the positions of
+            // downHandler.firstPosition and oldBoxOffset.
+            ?>
+            downHandler.firstPosition.x -= xDelta;
+            downHandler.firstPosition.y -= yDelta;
+            oldBoxOffset.left -= xDelta;
+            oldBoxOffset.top -= yDelta;
+          }
+
+          <?php // Otherwise redraw the box ?>
+          if (e.pageX < downHandler.firstPosition.x)
+          {
+            if (e.pageY < downHandler.firstPosition.y)
             {
               box.offset({top: e.pageY, left: e.pageX});
             }
             else
             {
-              box.offset({top: downHandler.origin.top, left: e.pageX});
+              box.offset({top: downHandler.firstPosition.y, left: e.pageX});
             }
           }
-          else if (e.pageY < downHandler.origin.top)
+          else if (e.pageY < downHandler.firstPosition.y)
           {
-            box.offset({top: e.pageY, left: downHandler.origin.left});
+            box.offset({top: e.pageY, left: downHandler.firstPosition.x});
           }
           else
           {
-            box.offset(downHandler.origin);
+            box.offset({top: downHandler.firstPosition.y, left: downHandler.firstPosition.x});
           }
-          box.width(Math.abs(e.pageX - downHandler.origin.left));
-          box.height(Math.abs(e.pageY - downHandler.origin.top));
-          Table.snapToGrid(box, 'top');
-          Table.snapToGrid(box, 'bottom');
-          Table.snapToGrid(box, 'right');
-          Table.snapToGrid(box, 'left');
+          box.width(Math.abs(e.pageX - downHandler.firstPosition.x));
+          box.height(Math.abs(e.pageY - downHandler.firstPosition.y));
+          <?php
+          // Snap the box to grid boundaries if it's close, and even if it's not
+          // if you're dragging away from that edge.
+          ?>
+          var draggingDown = (e.pageY > downHandler.firstPosition.y);
+          var draggingRight = (e.pageX > downHandler.firstPosition.x);
+          Table.snapToGrid(box, 'top', draggingDown);
+          Table.snapToGrid(box, 'left', draggingRight);
+          Table.snapToGrid(box, 'bottom', !draggingDown);
+          Table.snapToGrid(box, 'right', !draggingRight);
+
           <?php
           // If the new box overlaps a booked cell, then undo the changes
           // We set stopAtFirst=true because we just want to know if there is
@@ -825,7 +1061,6 @@ $(document).on('page_ready', function() {
           $(document).off('mousemove',moveHandler);
           $(document).off('mouseup', upHandler);
 
-
           <?php
           // If the user has released the button while outside the table it means
           // they want to cancel, so just return.
@@ -847,7 +1082,7 @@ $(document).on('page_ready', function() {
           {
             if (downHandler.originalLink !== undefined)
             {
-              window.location = downHandler.originalLink;
+              window.location = addScrollPosition(downHandler.originalLink, tableContainer);
             }
             else
             {
@@ -881,7 +1116,7 @@ $(document).on('page_ready', function() {
           {
             queryString += '&site=' + encodeURIComponent(args.site);
           }
-          window.location = 'edit_entry.php?' + queryString;
+          window.location = addScrollPosition('edit_entry.php?' + queryString, tableContainer);
         };
 
 
@@ -900,9 +1135,9 @@ $(document).on('page_ready', function() {
         }
 
         <?php
-        // Get the sides of the desired resired rectangle and also the direction(s)
-        // of resize.  Note that the desired rectangle may be being moved in two
-        // directions at once (eg nw) if a corner has been grabbed.  Use Math.round
+        // Get the sides of the desired rectangle and also the direction(s) of
+        // resize.  Note that the desired rectangle may be being moved in two
+        // directions at once (eg nw) if a corner has been grabbed. Use Math.round
         // to avoid problems with floats.
         ?>
         if (Math.round(ui.position.top - ui.originalPosition.top) === 0)
@@ -1033,22 +1268,22 @@ $(document).on('page_ready', function() {
         <?php // left edge ?>
         if (sides.w)
         {
-          Table.snapToGrid(ui.helper, 'left');
+          Table.snapUiToGrid(ui, 'left');
         }
         <?php // right edge ?>
         if (sides.e)
         {
-          Table.snapToGrid(ui.helper, 'right');
+          Table.snapUiToGrid(ui, 'right');
         }
         <?php // top edge ?>
         if (sides.n)
         {
-          Table.snapToGrid(ui.helper, 'top');
+          Table.snapUiToGrid(ui, 'top');
         }
         <?php // bottom edge ?>
         if (sides.s)
         {
-          Table.snapToGrid(ui.helper, 'bottom');
+          Table.snapUiToGrid(ui, 'bottom');
         }
 
         resize.lastRectangle = $.extend({}, rectangle);
@@ -1093,8 +1328,7 @@ $(document).on('page_ready', function() {
         // regardless of where they are.
         ?>
         ['left', 'right', 'top', 'bottom'].forEach(function(side) {
-            Table.snapToGrid(ui.helper, side, true);
-            Table.snapToGrid(ui.element, side, true);
+            Table.snapUiToGrid(ui, side, true);
           });
 
         if (rectanglesIdentical(resizeStart.originalRectangle, getSides(ui.helper)))
@@ -1187,7 +1421,7 @@ $(document).on('page_ready', function() {
         // then any opacity rule that is applied to the parent will also apply to the child.
         ?>
         booking.addClass('saving')
-               .after('<span class="saving"><?php echo get_vocab('saving'); ?></span>');
+               .after('<span class="saving"><?php echo get_js_vocab('saving'); ?></span>');
 
         if(args.site)
         {
@@ -1247,7 +1481,7 @@ $(document).on('page_ready', function() {
             $('table.dwm_main').trigger('tableload');
             <?php // Allow some time for the changes above to complete and then alert the user ?>
             setTimeout(function() {
-                alert("<?php echo escape_js(get_vocab('resize_error'))?>");
+                alert("<?php echo get_js_vocab('resize_error')?>");
               }, 250
             );
 

@@ -12,6 +12,7 @@ use MRBS\Form\ElementInputSubmit;
 use MRBS\Form\ElementLabel;
 use MRBS\Form\ElementSelect;
 use MRBS\Form\ElementSpan;
+use MRBS\Form\Field;
 use MRBS\Form\FieldDiv;
 use MRBS\Form\FieldInputCheckbox;
 use MRBS\Form\FieldInputCheckboxGroup;
@@ -106,7 +107,7 @@ foreach ($fields as $field)
 }
 
 
-function get_field_create_by(string $create_by, bool $disabled=false)
+function get_field_create_by(string $create_by, bool $disabled=false) : Field
 {
   $params = array('label'    => get_vocab('createdby'),
                   'name'     => 'create_by',
@@ -119,7 +120,7 @@ function get_field_create_by(string $create_by, bool $disabled=false)
 }
 
 
-function get_field_name(string $value, $disabled=false)
+function get_field_name(string $value, bool $disabled=false) : Field
 {
   $params = array('label'    => get_vocab('namebooker'),
                   'name'     => 'name',
@@ -132,7 +133,7 @@ function get_field_name(string $value, $disabled=false)
 }
 
 
-function get_field_description(string $value, $disabled=false)
+function get_field_description(string $value, bool $disabled=false) : Field
 {
   global $is_mandatory_field;
 
@@ -586,8 +587,7 @@ function get_field_privacy_status(bool $value, bool $disabled=false) : ?FieldInp
 function get_field_custom(string $key, bool $disabled=false)
 {
   global $custom_fields, $custom_fields_map;
-  global $is_mandatory_field, $text_input_max;
-  global $select_options, $datalist_options;
+  global $is_mandatory_field;
 
   // TODO: have a common way of generating custom fields for all tables
 
@@ -607,17 +607,6 @@ function get_field_custom(string $key, bool $disabled=false)
   {
     $class = 'FieldInputCheckbox';
   }
-  // Output a textarea if it's a character string longer than the limit for a
-  // text input and it's not a select or datalist element
-  elseif (($custom_field['nature'] == 'character') &&
-           isset($custom_field['length']) &&
-           ($custom_field['length'] > $text_input_max) &&
-           empty($select_options["entry.$key"]) &&
-           empty($datalist_options["entry.$key"]))
-  {
-    // HTML5 does not allow a pattern attribute for the textarea element
-    $class = 'FieldTextarea';
-  }
   elseif ($custom_field['type'] == 'date')
   {
     $class = 'FieldInputDate';
@@ -628,8 +617,8 @@ function get_field_custom(string $key, bool $disabled=false)
   {
     $class = 'FieldInputNumber';
   }
-  // Otherwise it's a text input of some kind (which includes <select>s and
-  // <datalist>s)
+  // Otherwise it's a text input of some kind (which includes <select>s,
+  // <datalist>s and <textarea>s)
   else
   {
     $params = array('label'    => get_loc_field_name(_tbl('entry'), $key),
@@ -1195,7 +1184,7 @@ if (isset($start_date))
     // The end date that came through from the drag select is actually the repeat end
     // date, and the real end date will actually be the start date.
     $rep_type = RepeatRule::DAILY;
-    $rep_end_date = DateTime::createFromFormat('Y-m-d', $end_date);
+    $rep_end_date = DateTime::createFromFormat(DateTime::ISO8601_DATE, $end_date);
     $end_date = $start_date;
   }
 }
@@ -1704,6 +1693,20 @@ if (!empty($back_button))
 $hidden_inputs = array('returl'      => $returl,
                        'rep_id'      => $rep_id,
                        'edit_series' => $edit_series);
+
+// If we're going back to the index page then add any scroll positions to the
+// hidden inputs so that the JavaScript can scroll back to the same position.
+if ('index.php' == basename(parse_url($returl, PHP_URL_PATH)))
+{
+  foreach (['top', 'left'] as $var)
+  {
+    $$var = get_form_var($var, 'string');
+    if (isset($$var))
+    {
+      $hidden_inputs[$var] = $$var;
+    }
+  }
+}
 
 $form->addHiddenInputs($hidden_inputs);
 

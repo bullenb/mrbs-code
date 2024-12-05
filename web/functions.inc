@@ -4,6 +4,7 @@ namespace MRBS;
 
 use DateInterval;
 use DateTimeZone;
+use MRBS\Form\Field;
 use MRBS\Form\FieldSelect;
 use MRBS\ICalendar\RFC5545;
 use PHPMailer\PHPMailer\PHPMailer;
@@ -1018,28 +1019,38 @@ function fromTimeString(&$units, $dur_units)
 
 // Gets the interval in periods for a booking with $start_time and $end_time
 // Takes account of DST
-function get_period_interval(int $start_time, int $end_time) : int
+function get_period_interval(int $start_time, int $end_time, int $area_id) : int
 {
-  global $periods;
+  static $area_details = [];
 
-  $periods_per_day = count($periods);
+  if (!isset($area_details[$area_id]))
+  {
+    $area_details[$area_id] = get_area_details($area_id);
+  }
 
+  $periods_per_day = count(json_decode($area_details[$area_id]['periods']));
+  $date_time_zone = new DateTimeZone($area_details[$area_id]['timezone']);
+
+  // Create start and end dates and set both dates to noon so that we can compare them
+  // and get an integral number of days difference.  Noon also happens to be when
+  // periods start, so will be useful in a moment.
   $startDate = new DateTime();
-  $startDate->setTimestamp($start_time);
-  $endDate = new DateTime();
-  $endDate->setTimestamp($end_time);
+  $startDate
+    ->setTimezone($date_time_zone)
+    ->setTimestamp($start_time)
+    ->modify('12:00');
 
-  // Set both dates to noon so that we can compare them and get an integral
-  // number of days difference.  Noon also happens to be when periods start,
-  // so will be useful in a moment.
-  $startDate->modify('12:00');
-  $endDate->modify('12:00');
+  $endDate = new DateTime();
+  $endDate
+    ->setTimezone($date_time_zone)
+    ->setTimestamp($end_time)
+    ->modify('12:00');
 
   // Calculate the difference in days
   $interval = $startDate->diff($endDate);
-  $interval_days = $interval->format('%a');
+  $interval_days = intval($interval->format('%a'));
 
-  if ($interval_days == 0)
+  if ($interval_days === 0)
   {
     // If the interval starts and ends on the same day, then we just calculate the number
     // of periods by calculating the number of minutes between the start and end times.
@@ -1049,11 +1060,11 @@ function get_period_interval(int $start_time, int $end_time) : int
   {
     // Otherwise we calculate the number of periods on the first day
     $startDate->add(new DateInterval('PT' . $periods_per_day . 'M'));
-    $result = get_period_interval($start_time, $startDate->getTimestamp());
+    $result = get_period_interval($start_time, $startDate->getTimestamp(), $area_id);
     // Add in the number of whole days worth of periods in between
     $result += ($interval_days - 1) * $periods_per_day;
     // And add in the number of periods on the last day
-    $result += get_period_interval($endDate->getTimestamp(), $end_time);
+    $result += get_period_interval($endDate->getTimestamp(), $end_time, $area_id);
   }
 
   return (int) $result;
@@ -1144,45 +1155,6 @@ function date_byday(int $timestamp) : string
     $ord = -1;
   }
   return $ord . $dow;
-}
-
-
-// Converts a BYDAY (eg "2SU") value for a given year and month into a
-// day of the month.   Returns FALSE if the day does not exist (eg for "5SU"
-// when there are only four Sundays in the month)
-function byday_to_day(int $year, int $month, string $byday)
-{
-  // First of all normalise the month and year, as we allow $month > 12
-  while ($month > 12)
-  {
-    $month -= 12;
-    $year++;
-  }
-  // Get the ordinal number and the day of the week
-  list('ordinal' => $ord, 'day' => $dow) = RFC5545::parseByday($byday);
-  // Get the starting day of the month
-  $start_dom = ($ord > 0) ? 1 : date('t', mktime(0, 0, 0, $month, 1, $year));
-  // Get the starting day of the week
-  $start_dow = date('w', mktime(0, 0, 0, $month, $start_dom, $year));
-  // Turn the BYDAY day of the week into an integer
-  $byday_dow = RFC5545::convertDayToOrd($dow);
-  // get the difference in days
-  $diff = $byday_dow - $start_dow;
-  $diff += ($ord > 0) ? DAYS_PER_WEEK : -DAYS_PER_WEEK;
-  $diff = $diff %DAYS_PER_WEEK;
-  // add in the weeks
-  $diff += ($ord > 0) ? ($ord - 1) * DAYS_PER_WEEK : ($ord + 1) * DAYS_PER_WEEK;
-
-  $day = $start_dom + $diff;
-
-  if (checkdate($month, $day, $year))
-  {
-    return $day;
-  }
-  else
-  {
-    return false;
-  }
 }
 
 
@@ -1373,7 +1345,7 @@ function get_duration(int $start_time, int $end_time, bool $enable_periods, int 
   if ($enable_periods)
   {
     $periods_per_day = count($period_names[$area_id]);
-    $n_periods = get_period_interval($start_time, $end_time);  // this handles DST
+    $n_periods = get_period_interval($start_time, $end_time, $area_id);  // this handles DST
     if (($n_periods % $periods_per_day) == 0)
     {
       $result['duration'] =  intval($n_periods/$periods_per_day);
@@ -1793,15 +1765,8 @@ function times_somewhere(bool $only_enabled=false) : bool
 // to make sure it's a valid date
 function format_iso_date(int $year, int $month, int $day) : string
 {
-  if (!checkdate($month, $day, $year))
-  {
-    $date = getdate(mktime(12, 0, 0, $month, $day, $year));
-    $year = $date['year'];
-    $month = $date['mon'];
-    $day = $date['mday'];
-  }
-
-  return sprintf("%04d-%02d-%02d", $year, $month, $day);
+  $date = new DateTime();
+  return $date->setDate($year, $month, $day)->format(DateTime::ISO8601_DATE);
 }
 
 
@@ -1810,7 +1775,7 @@ function format_iso_date(int $year, int $month, int $day) : string
 // on failure.
 function split_iso_date(string $iso_date)
 {
-  if (false === ($date = DateTime::createFromFormat('Y-m-d', $iso_date)))
+  if (false === ($date = DateTime::createFromFormat(DateTime::ISO8601_DATE, $iso_date)))
   {
     return false;
   }
@@ -1830,7 +1795,7 @@ function validate_iso_date(string $date) : bool
   // the inverse operation gives the original string then it is
   // valid.  (This is to check that, for example, 2021-09-31 hasn't
   // been converted into 2021-10-01).
-  $format = 'Y-m-d';
+  $format = DateTime::ISO8601_DATE;
   $datetime = DateTime::createFromFormat($format, $date);
 
   return ($datetime && ($datetime->format($format) === $date));
@@ -2504,6 +2469,15 @@ function is_cli() : bool
 }
 
 
+// Determine whether this is a GET request
+function is_get_request() : bool
+{
+  global $server;
+
+  return ($server['REQUEST_METHOD'] === 'GET');
+}
+
+
 // Determines whether we are in kiosk mode
 function is_kiosk_mode() : bool
 {
@@ -2568,9 +2542,9 @@ function get_server_software() : string
 
 
 
-function get_field_entry_input(array $params)
+function get_field_entry_input(array $params) : Field
 {
-  global $select_options, $datalist_options;
+  global $select_options, $datalist_options, $text_input_max;
 
   if (isset($params['field']))
   {
@@ -2582,13 +2556,21 @@ function get_field_entry_input(array $params)
     {
       $class = 'FieldInputDatalist';
     }
-    elseif ($params['field'] == 'entry.description')
-    {
-      $class = 'FieldTextarea';
-    }
     else
     {
-      $class = 'FieldInputText';
+      $columns = Columns::getInstance(_tbl('entry'));
+      $column_name = preg_replace('/^entry./', '', $params['field']);
+      $column = $columns->getColumnByName($column_name);
+      if (!in_array($column_name, ['name', 'create_by']) &&  // special cases
+          ($column->getNature() === Column::NATURE_CHARACTER) &&
+          ($column->getLength() > $text_input_max))
+      {
+        $class = 'FieldTextarea';
+      }
+      else
+      {
+        $class = 'FieldInputText';
+      }
     }
   }
   else
@@ -2634,7 +2616,7 @@ function get_field_entry_input(array $params)
     case 'FieldTextarea':
       if ($class == 'FieldTextarea')
       {
-        $field->setControlText($params['value']);
+        $field->setControlText($params['value'] ?? '');
       }
       else
       {
@@ -2672,7 +2654,7 @@ function get_field_entry_input(array $params)
 //    field       the field name, eg 'entry.create_by'
 //    label       the field label
 //    name        the field name
-function get_user_field(array $params, bool $datalist=false)
+function get_user_field(array $params, bool $datalist=false) : Field
 {
   if (method_exists(auth(), 'getUsernames'))
   {

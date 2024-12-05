@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace MRBS;
 
+use DateTimeImmutable;
 use MRBS\ICalendar\RFC5545;
 
 define('INTERVAL_DAY', 0);
@@ -152,7 +153,7 @@ function mrbsCheckFree(array $booking, ?int $ignore_entry_id=null, ?int $ignore_
     }
 
     // enclose the viewday etc. links in a span to make it easier for JavaScript to strip them out
-    $vars = array('page_date' => $existing_start_date->format('Y-m-d'),
+    $vars = array('page_date' => $existing_start_date->getISODate(),
                   'area'  => $area,
                   'room'  => $room_id);
 
@@ -600,40 +601,38 @@ function mrbsCheckPolicy(array $booking, ?int $ignore_entry_id=null, ?int $ignor
   // Check min_booking_date
   if ($min_booking_date_enabled && !$delete)
   {
-    list($y, $m, $d) = explode('-', $min_booking_date);
-    if (isset($y) && isset($m) && isset($d) && checkdate($m, $d, $y))
+    // Use DateTimeImmutable because we will need the original date for the error message
+    $date_immutable = DateTimeImmutable::createFromFormat($format=DateTime::ISO8601_DATE, $min_booking_date);
+    // Check that the date is valid (createFromFormat will allow, for example, months > 12)
+    if (($date_immutable === false) || ($date_immutable->format($format) !== $min_booking_date))
     {
-      if ($booking['start_time'] < mktime(0, 0, 0, $m, $d, $y))
-      {
-        $violations[] = get_vocab(
-          'earliest_booking_date',
-          datetime_format($datetime_formats['date'], mktime(0, 0, 0, $m, $d, $y))
-        );
-      }
+      throw new \Exception('MRBS config error: invalid $min_booking_date ' . "'$min_booking_date'");
     }
-    else
+    if ($booking['start_time'] < $date_immutable->setTime(0, 0)->getTimestamp())
     {
-      trigger_error("Invalid min_book_ahead_date", E_USER_NOTICE);
+      $violations[] = get_vocab(
+        'earliest_booking_date',
+        datetime_format($datetime_formats['date'], $date_immutable->getTimestamp())
+      );
     }
   }
 
   // Check max_booking_date
   if ($max_booking_date_enabled && !$delete)
   {
-    list($y, $m, $d) = explode('-', $max_booking_date);
-    if (isset($y) && isset($m) && isset($d) && checkdate($m, $d, $y))
+    // Use DateTimeImmutable because we will need the original date for the error message
+    $date_immutable = DateTimeImmutable::createFromFormat($format=DateTime::ISO8601_DATE, $max_booking_date);
+    // Check that the date is valid (createFromFormat will allow, for example, months > 12)
+    if (($date_immutable === false) || ($date_immutable->format($format) !== $max_booking_date))
     {
-      if ($booking['end_time'] > mktime(0, 0, 0, $m, $d+1, $y))
-      {
-        $violations[] = get_vocab(
-          'latest_booking_date',
-          datetime_format($datetime_formats['date'], mktime(0, 0, 0, $m, $d, $y))
-        );
-      }
+      throw new \Exception('MRBS config error: invalid $max_booking_date ' . "'$max_booking_date'");
     }
-    else
+    if ($booking['end_time'] > $date_immutable->setTime(0, 0)->modify('+1 day')->getTimestamp())
     {
-      trigger_error("Invalid max_book_ahead_date", E_USER_NOTICE);
+      $violations[] = get_vocab(
+        'latest_booking_date',
+        datetime_format($datetime_formats['date'], $date_immutable->getTimestamp())
+      );
     }
   }
 
@@ -1389,22 +1388,6 @@ function mrbsCreateSingleEntry(array $data) : int
 function mrbsCreateRepeatEntry(array $data)
 {
   return mrbsCreateEntry(_tbl('repeat'), $data);
-}
-
-
-function trimToEndOfMonth(&$month, &$day, &$year)
-{
-  // Make the month valid so that we can use checkdate()
-  while ($month > 12)
-  {
-    $month -= 12;
-    $year++;
-  }
-  // Make the date valid if day is more than number of days in month:
-  while (!checkdate($month, $day, $year) && ($day > 1))
-  {
-    $day--;
-  }
 }
 
 
@@ -2478,7 +2461,7 @@ function update_participants(int $old_id, int $new_id) : bool
 function mrbsMakeBookings(array $bookings, ?int $id=null, bool $just_check=false, bool $skip=false, ?int $original_room_id=null, bool $send_mail=false, bool $edit_series=false)
 {
   global $max_rep_entrys, $enable_periods, $resolution, $mail_settings;
-  global $prevent_simultaneous_bookings, $auth;
+  global $auth;
 
   // All the data, except for the status and room id, will be common
   // across the bookings
@@ -2784,7 +2767,11 @@ function mrbsMakeBookings(array $bookings, ?int $id=null, bool $just_check=false
     }
     else
     {
-      // Create the entry:
+      // Make sure the keys below are set properly for a single entry (they might not
+      // be if we've been editing a series and changed its repeat type to "none").
+      $booking['repeat_id'] = null;
+      $booking['entry_type'] = ENTRY_SINGLE;
+      // Create the entry
       $new_id = mrbsCreateSingleEntry($booking);
       // Update the participants table
       if (isset($id))

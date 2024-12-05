@@ -583,6 +583,21 @@ function type_wrap(string $string, string $data_type) : string
 }
 
 
+function clean_row(array $row) : array
+{
+  row_cast_columns($row, 'entry');
+  // These won't have been covered by row_cast_columns()
+  $row['area_id'] = (int) $row['area_id'];
+  $row['last_updated'] = (int) $row['last_updated'];
+  $row['approval_enabled'] = (bool) $row['approval_enabled'];
+  $row['confirmation_enabled'] = (bool) $row['confirmation_enabled'];
+  $row['enable_periods'] = (bool) $row['enable_periods'];
+  unpack_status($row);
+
+  return $row;
+}
+
+
 // Gets the indices of the columns that should be sorted
 function get_sort_columns(string $sortby) : array
 {
@@ -1175,9 +1190,11 @@ function accumulate_summary($row, &$count, &$hours, $report_start, $report_end,
     $endDate->setTimestamp($report_end)->modify('12:00');
     $endDate->sub(new DateInterval('P1D'));  // Go back one day because the $report_end is at 00:00 the day after
     $endDate->add(new DateInterval('PT' . $periods_per_day . 'M'));
-
-    $increment = get_period_interval(max($row['start_time'], $startDate->getTimestamp()),
-                                     min($row['end_time'], $endDate->getTimestamp()));
+    $increment = get_period_interval(
+      max($row['start_time'], $startDate->getTimestamp()),
+      min($row['end_time'], $endDate->getTimestamp()),
+      $row['area_id']
+    );
     $room_hash[$room] = MODE_PERIODS;
   }
   else
@@ -1460,8 +1477,8 @@ if ($cli_mode)
 
 $default_from_time = mktime(0, 0, 0, $month, $day, $year);
 $default_to_time = mktime(0, 0, 0, $month, $day + $default_report_days, $year);
-$default_from_date = date('Y-m-d', $default_from_time);
-$default_to_date = date('Y-m-d', $default_to_time);
+$default_from_date = date(DateTime::ISO8601_DATE, $default_from_time);
+$default_to_date = date(DateTime::ISO8601_DATE, $default_to_time);
 
 // Get non-standard form variables
 $from_date = get_form_var('from_date', 'string', $default_from_date);
@@ -1511,9 +1528,24 @@ else
     Form::checkToken(true);
   }
 
-  // Check the user is authorised for this page
-  checkAuthorised(this_page());
-  $mrbs_user = session()->getCurrentUser();
+  // Check the user is authorised for this page.
+  if ($report_unauthenticated_get_enabled && is_get_request() && ($phase == 2))
+  {
+    if ($report_keys_enabled)
+    {
+      $key = get_form_var('key', 'string');
+      if (!in_array($key, $report_keys))
+      {
+        http_response_code(403);
+        exit;
+      }
+    }
+  }
+  else
+  {
+    checkAuthorised(this_page());
+    $mrbs_user = session()->getCurrentUser();
+  }
 }
 
 // Set up for Ajax.   We need to know whether we're capable of dealing with Ajax
@@ -1615,16 +1647,16 @@ $field_order_list[] = 'last_updated';
 if ($phase == 2)
 {
   // Start and end times are also used to clip the times for summary info.
-  // createFromFormat('Y-m-d') gives the current time.  We want the report to
+  // createFromFormat() gives the current time.  We want the report to
   // start at the beginning of the start day and end of the day, so set the
   // times accordingly.
-  if (false === ($report_start = DateTime::createFromFormat('Y-m-d', $from_date)))
+  if (false === ($report_start = DateTime::createFromFormat(DateTime::ISO8601_DATE, $from_date)))
   {
     throw new Exception("Invalid from_date '$from_date'");
   }
   $report_start = $report_start->setTime(0, 0)->getTimestamp();
 
-  if (false === ($report_end = DateTime::createFromFormat('Y-m-d', $to_date)))
+  if (false === ($report_end = DateTime::createFromFormat(DateTime::ISO8601_DATE, $to_date)))
   {
     throw new Exception("Invalid to_date '$to_date'");
   }
@@ -1759,6 +1791,16 @@ if ($phase == 2)
       $sql .= " AND ((A.private_override='public') OR
                      ((A.private_override='none') AND (E.status&" . STATUS_PRIVATE . "=0)))";
     }
+  }
+
+  // If we're allowing unauthenticated requests and this is one then check that the
+  // room is in the list of open rooms or the area is in the list of open areas.
+  if ($report_unauthenticated_get_enabled && is_get_request())
+  {
+    $sql .= " AND (";
+    $sql .= db()->syntax_in_list('A.id', $report_open_areas, $sql_params) . " OR ";
+    $sql .= db()->syntax_in_list('R.id', $report_open_rooms, $sql_params);
+    $sql .= ")";
   }
 
   if ($output_format == OUTPUT_ICAL)
@@ -1934,14 +1976,7 @@ if ($phase == 2)
       $body_rows = array();
       while (false !== ($row = $res->next_row_keyed()))
       {
-        row_cast_columns($row, 'entry');
-        // These won't have been covered by row_cast_columns()
-        $row['area_id'] = (int) $row['area_id'];
-        $row['last_updated'] = (int) $row['last_updated'];
-        $row['approval_enabled'] = (bool) $row['approval_enabled'];
-        $row['confirmation_enabled'] = (bool) $row['confirmation_enabled'];
-        $row['enable_periods'] = (bool) $row['enable_periods'];
-        unpack_status($row);
+        $row = clean_row($row);
         report_row($body_rows, $row);
       }
       output_body_rows($body_rows, $output_format);
@@ -1955,7 +1990,7 @@ if ($phase == 2)
       {
         while (false !== ($row = $res->next_row_keyed()))
         {
-          unpack_status($row);
+          $row = clean_row($row);
           accumulate_summary($row, $count, $hours,
                              $report_start, $report_end,
                              $room_hash, $name_hash);

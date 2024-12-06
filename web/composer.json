@@ -1,6 +1,11 @@
 {
     "name": "bullenb/mrbs-code",
     "type": "project",
+    "autoload": {
+        "psr-4": {
+            "MRBS\\": "lib/MRBS/"
+        }
+    },
     "authors": [
         {
             "name": "Brendan Bullen",

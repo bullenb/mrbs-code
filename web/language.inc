@@ -172,11 +172,11 @@ function set_mrbs_locale($locale)
   if (false === setlocale(LC_ALL, $os_locale))
   {
     // $os_locale will be an array
-    $message = "Server failed to set locale to " . json_encode($os_locale) .
-               " for language tag '$locale'.  Either install the missing locale" .
-               ' or set $override_locale in your MRBS config.inc.php file to a' .
-               ' locale that is available on your server.';
-    trigger_error($message, E_USER_NOTICE);
+    // $message = "Server failed to set locale to " . json_encode($os_locale) .
+    //            " for language tag '$locale'.  Either install the missing locale" .
+    //            ' or set $override_locale in your MRBS config.inc.php file to a' .
+    //            ' locale that is available on your server.';
+    // trigger_error($message, E_USER_NOTICE);
 
     if (false === setlocale(LC_ALL, array('C.UTF-8', 'C.utf-8', 'C.utf8', 'C')))
     {

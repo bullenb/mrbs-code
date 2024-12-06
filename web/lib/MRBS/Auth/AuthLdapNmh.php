@@ -17,12 +17,21 @@ class AuthLdapNmh extends AuthLdap
         ]);
     }
 
+    private function getDefaultUsername(string $username): string
+    {
+        $username = trim(strtolower($username));
+
+        return str_starts_with($username, 'apps\\') ? $username : 'apps\\' . $username;
+    }
+
     public function validateUser(
         #[\SensitiveParameter]
         ?string $user,
         #[\SensitiveParameter]
         ?string $pass
     ) {
+        $user = $this->getDefaultUsername($user);
+
         return $this->getLdapConnection()->auth()->attempt($user, $pass) ? $user : false;
     }
 
@@ -34,8 +43,10 @@ class AuthLdapNmh extends AuthLdap
         //     return null;
         // }
 
+        $username = $this->getDefaultUsername($username);
+
         $user = new User($username);
-        $user->display_name = $username;
+        $user->display_name = str_replace('apps\\', '', $username);
         $user->level = $this->getDefaultLevel($username);
         $user->email = $this->getDefaultEmail($username);
 

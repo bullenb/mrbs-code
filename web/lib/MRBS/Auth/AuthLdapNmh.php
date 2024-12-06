@@ -19,9 +19,11 @@ class AuthLdapNmh extends AuthLdap
 
     private function getDefaultUsername(string $username): string
     {
+        global $ldap_prefix;
+
         $username = trim(strtolower($username));
 
-        return str_starts_with($username, 'apps\\') ? $username : 'apps\\' . $username;
+        return $ldap_prefix && str_starts_with($username, $ldap_prefix . '\\') ? $username : $ldap_prefix . '\\' . $username;
     }
 
     public function validateUser(
@@ -43,10 +45,12 @@ class AuthLdapNmh extends AuthLdap
         //     return null;
         // }
 
+        global $ldap_prefix;
+
         $username = $this->getDefaultUsername($username);
 
         $user = new User($username);
-        $user->display_name = str_replace('apps\\', '', $username);
+        $user->display_name = $ldap_prefix ? str_replace($ldap_prefix . '\\', '', $username) : $username;
         $user->level = $this->getDefaultLevel($username);
         $user->email = $this->getDefaultEmail($username);
 

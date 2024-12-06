@@ -4,6 +4,7 @@ namespace MRBS;
 
 use IntlDateFormatter;
 
+require_once 'vendor/autoload.php';
 require_once 'lib/autoload.inc';
 
 /**************************************************************************

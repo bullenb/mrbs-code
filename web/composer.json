@@ -1,0 +1,13 @@
+{
+    "name": "bullenb/mrbs-code",
+    "type": "project",
+    "authors": [
+        {
+            "name": "Brendan Bullen",
+            "email": "66941+bullenb@users.noreply.github.com"
+        }
+    ],
+    "require": {
+        "directorytree/ldaprecord": "^2"
+    }
+}

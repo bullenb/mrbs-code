@@ -11,3 +11,5 @@ web/config.inc.php
 /hg-code.iml
 /nbproject
 /.vs
+*.code-workspace
+/web/vendor

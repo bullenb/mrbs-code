@@ -10,4 +10,12 @@ $db_password = "mrbs";
 $db_tbl_prefix = "mrbs_";
 $db_persist = FALSE;
 
-$auth['type'] = "ldap_nmh";
+$auth['type'] = 'config';
+$auth['user'] = [
+    'admin' => 'admin',
+    'user' => 'user',
+];
+
+$auth['admin'] = [
+    'admin',
+];

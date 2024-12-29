@@ -2,19 +2,29 @@
 
 namespace MRBS\Auth;
 
-use MRBS\User;
+use MRBS\User as MRBSUser;
+use LdapRecord\Container;
+use LdapRecord\Connection;
 
 require_once __DIR__ . '/../../../vendor/autoload.php';
 
 class AuthLdapNmh extends AuthLdap
 {
-    private function getLdapConnection(): \LdapRecord\Connection
+    private Connection $connection;
+
+    private function getLdapConnection(): Connection
     {
         global $ldap_host;
 
-        return new \LdapRecord\Connection([
-            'hosts' => (array) $ldap_host,
-        ]);
+        if (!isset($this->connection)) {
+            $this->connection = new Connection([
+                'hosts' => (array) $ldap_host,
+            ]);
+
+            Container::addConnection($this->connection);
+        }
+
+        return $this->connection;
     }
 
     private function getDefaultUsername(string $username): string
@@ -37,20 +47,14 @@ class AuthLdapNmh extends AuthLdap
         return $this->getLdapConnection()->auth()->attempt($user, $pass) ? $user : false;
     }
 
-    protected function getUserFresh(string $username): ?User
+    protected function getUserFresh(string $username): ?MRBSUser
     {
-        // $user = $this->getLdapConnection()->query()->where('uid', '=', $username)->first();
-
-        // if (!$user) {
-        //     return null;
-        // }
-
         global $ldap_prefix;
 
-        $username = $this->getDefaultUsername($username);
+        $username = $ldap_prefix ? str_replace($ldap_prefix . '\\', '', $username) : $username;
 
-        $user = new User($username);
-        $user->display_name = $ldap_prefix ? str_replace($ldap_prefix . '\\', '', $username) : $username;
+        $user = new MRBSUser($username);
+        $user->display_name = $username;
         $user->level = $this->getDefaultLevel($username);
         $user->email = $this->getDefaultEmail($username);
 

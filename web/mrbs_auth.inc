@@ -433,6 +433,11 @@ function is_book_admin($rooms=null, $all=true) : bool
   }
 
   $mrbs_user = session()->getCurrentUser();
+  $room = intval($rooms);
+
+  if ($room > 0 && isset($auth["book_admin"]["room"][$room]) && in_array($mrbs_user->username, $auth["book_admin"]["room"][$room])) {
+    return true;
+  }
 
   return (isset($mrbs_user) && ($mrbs_user->level >= $min_booking_admin_level));
 }

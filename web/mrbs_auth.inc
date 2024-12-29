@@ -393,7 +393,7 @@ function is_admin() : bool
 //           the room(s); otherwise FALSE
 function is_book_admin($rooms=null, $all=true) : bool
 {
-  global $min_booking_admin_level;
+  global $min_booking_admin_level, $auth;
 
   if (is_array($rooms) && (count($rooms) > 0))
   {

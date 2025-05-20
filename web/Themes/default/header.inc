@@ -228,6 +228,8 @@ function print_menu_items(string $query) : void
     $menu_items['user_list'] = 'edit_users.php';
   }
 
+  echo '<a href="' . htmlspecialchars(multisite("index.php")) . '">' . get_vocab("home") . "</a>\n";
+
   foreach ($menu_items as $token => $page)
   {
     // Only print menu items for which the user is allowed to access the page
@@ -670,4 +672,3 @@ function print_theme_header(?array $context=null, bool $simple=false, bool $omit
 
 
 } // end of print_theme_header()
-

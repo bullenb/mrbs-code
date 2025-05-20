@@ -208,13 +208,13 @@ function generate_register_button(array $row, ?string $previous_page=null) : voi
 
   if (!$can_register_others)
   {
-    $form->addHiddenInput('username', $mrbs_user->username);
+    $form->addHiddenInput('username', $mrbs_user?->username);
   }
   else
   {
     $fieldset = new ElementFieldset();
     $params = array(
-        'value'     => $mrbs_user->username,
+        'value'     => $mrbs_user?->username,
         'disabled'  => false,
         'required'  => true,
         'field'     => 'participants.username',

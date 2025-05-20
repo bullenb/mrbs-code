@@ -500,7 +500,7 @@ class AuthLdap extends Auth
     $object['users'] = array();
     $users = array();
 
-    $res = $this->action('getUsernamesCallback', $mrbs_user->username, $object, true);
+    $res = $this->action('getUsernamesCallback', $mrbs_user?->username ?? '', $object, true);
 
     if ($res === false)
     {

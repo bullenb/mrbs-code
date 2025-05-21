@@ -1,5 +1,5 @@
 <?php
-declare(strict_types = 1);
+declare(strict_types=1);
 namespace MRBS\Auth;
 
 use MRBS\MailQueue;
@@ -14,10 +14,9 @@ use function MRBS\get_mail_charset;
 use function MRBS\get_vocab;
 use function MRBS\multisite;
 use function MRBS\parse_email;
+use function MRBS\row_cast_columns;
 use function MRBS\toTimeString;
 use function MRBS\url_base;
-use function MRBS\utf8_strpos;
-use function MRBS\utf8_strtolower;
 
 class AuthDb extends Auth
 {
@@ -95,7 +94,7 @@ class AuthDb extends Auth
     // Usernames are unique in the users table, so we only look for one.
     $sql = "SELECT password_hash, name
             FROM " . _tbl('users') . "
-           WHERE " . db()->syntax_casesensitive_equals('name', utf8_strtolower($user), $sql_params) . "
+           WHERE " . db()->syntax_casesensitive_equals('name', mb_strtolower($user), $sql_params) . "
            LIMIT 1";
 
     $res = db()->query($sql, $sql_params);
@@ -198,13 +197,33 @@ class AuthDb extends Auth
   // Return an array of all users
   public function getUsers() : array
   {
-    $sql = "SELECT *
+    // Add in an extra column, last_updated, which is the SQL timestamp converted to a UNIX
+    // timestamp.  We do the conversion in the SQL query so that it is converted using the
+    // same timezone that it was stored with.
+    $sql = "SELECT *, ". db()->syntax_timestamp_to_unix("timestamp") . " AS last_updated
               FROM " . _tbl('users') . "
              ORDER BY name";
 
     $res = db()->query($sql);
 
-    return $res->all_rows_keyed();
+    $result = $res->all_rows_keyed();
+
+    foreach ($result as &$row)
+    {
+      row_cast_columns($row, 'users');
+      // Turn the last_updated column into an int (some MySQL drivers will return a string,
+      // and it won't have been caught by row_cast_columns() as it's a derived result).
+      $row['last_updated'] = intval($row['last_updated']);
+    }
+
+    return $result;
+  }
+
+
+  // Checks whether the authentication type allows the creation of new users.
+  public function canCreateUsers() : bool
+  {
+    return true;
   }
 
 
@@ -258,7 +277,7 @@ class AuthDb extends Auth
       {
         // Check that the email addresses are the same
         if (!empty($possible_users) &&
-            (utf8_strtolower($possible_users[0]['email']) !== utf8_strtolower($login)))
+            (mb_strtolower($possible_users[0]['email']) !== mb_strtolower($login)))
         {
           return false;
         }
@@ -657,6 +676,32 @@ class AuthDb extends Auth
   }
 
 
+  // Returns a username given an email address.  Note that if two or more
+  // users share the same email address then the first one found will be
+  // returned.  If no user is found then NULL is returned.
+  public function getUsernameByEmail(string $email) : ?string
+  {
+    $sql = "SELECT name
+              FROM " . _tbl('users') . "
+             WHERE email=?";
+
+    $res = db()->query($sql, array($email));
+
+    if ($res->count() == 0)
+    {
+      return null;
+    }
+
+    if ($res->count() > 1)
+    {
+      // Could maybe do something better here
+      trigger_error("Email address not unique", E_USER_NOTICE);
+    }
+    $row = $res->next_row_keyed();
+    return $row['name'];
+  }
+
+
   // Returns an array of rows for all users with the email address $email.
   // Assumes that email addresses are case insensitive.
   // Allows equivalent Gmail addresses, ie ignores dots in the local part and
@@ -672,7 +717,7 @@ class AuthDb extends Auth
     // be case sensitive.  But before we can take account of this, the email addresses in the database
     // need to be normalised so that all the domain names are stored in lower case.  Then it will be
     // possible to do a case sensitive comparison.
-    if (utf8_strpos($email, '@') === false)
+    if (mb_strpos($email, '@') === false)
     {
       if (!empty($auth['allow_local_part_email']))
       {
@@ -695,7 +740,7 @@ class AuthDb extends Auth
       }
       // Special case for Gmail addresses: ignore dots in the local part and treat gmail.com and
       // googlemail.com as equivalent domains.
-      elseif (in_array(utf8_strtolower($address['domain']), array('gmail.com', 'googlemail.com')))
+      elseif (in_array(mb_strtolower($address['domain']), array('gmail.com', 'googlemail.com')))
       {
         $sql_params = array(str_replace('.', '', $address['local']));
         $sql_params[] = $sql_params[0];
@@ -736,7 +781,7 @@ class AuthDb extends Auth
     switch ($column_name)
     {
       case 'name':
-        $condition = db()->syntax_casesensitive_equals($column_name, utf8_strtolower($column_value), $sql_params);
+        $condition = db()->syntax_casesensitive_equals($column_name, mb_strtolower($column_value), $sql_params);
         break;
       case 'email':
         // For the moment we will assume that email addresses are case insensitive.   Whilst it is true

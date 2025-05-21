@@ -7,9 +7,106 @@ use DateTimeZone;
 use MRBS\Form\Field;
 use MRBS\Form\FieldSelect;
 use MRBS\ICalendar\RFC5545;
+use MRBS\Utf8\Utf8String;
+use Normalizer;
 use PHPMailer\PHPMailer\PHPMailer;
+use TypeError;
 
 require_once "mrbs_sql.inc";
+
+
+// Test to see if two strings are equal, optionally case-insensitively
+// See https://stackoverflow.com/questions/5473542/case-insensitive-string-comparison
+function mb_is_string_equal(string $string1, string $string2, bool $case_insensitive=false) : bool
+{
+  // Case-sensitive test
+  if (!$case_insensitive)
+  {
+    return ($string1 === $string2);
+  }
+
+  // Case-insensitive
+  // Quick test to see if they are equal in a case-sensitive fashion.
+  if ($string1 === $string2)
+  {
+    return true;
+  }
+  // Otherwise do a case-insensitive check
+  if (method_exists('Normalizer', 'normalize'))
+  {
+    $string1 = Normalizer::normalize($string1, Normalizer::FORM_KC);
+    $string2 = Normalizer::normalize($string2, Normalizer::FORM_KC);
+  }
+  return ((mb_strtolower($string1) === mb_strtolower($string2)) ||
+          (mb_strtoupper($string1) === mb_strtoupper($string2)));
+}
+
+
+// An emulation of mb_strpos() and mb_stripos() for UTF-8 that has the case-sensitivity as a parameter.
+function utf8_strpos_generic(string $haystack, string $needle, int $offset=0, bool $case_insensitive=false)
+{
+  $haystack_chars = (new Utf8String($haystack))->toArray();
+  $last_haystack_index = count($haystack_chars) - 1;
+  $needle_chars = (new Utf8String($needle))->toArray();
+  $last_needle_index = count($needle_chars) - 1;
+  // Note the +1 for negative offsets n the line below: it's the way the PHP implementation works
+  $start = ($offset < 0) ? $last_haystack_index + $offset + 1 : $offset;
+  $n = 0;
+
+  // Check that $offset is sensible.  (The PHP implementation allows an offset of +/-N on a
+  // string of length N. The error reporting in the PHP implementation depends on the PHP version.)
+  if (abs($offset) > $last_haystack_index + 1)
+  {
+    $message = __FUNCTION__ . '(): Argument #3 ($offset) must be contained in argument #1 ($haystack)';
+
+    if ((version_compare(PHP_VERSION, '8') >= 0))
+    {
+      throw new \ValueError($message);
+    }
+    else
+    {
+      $message = __FUNCTION__ . '(): Offset not contained in string';
+      trigger_error($message, E_USER_WARNING);
+      return false;
+    }
+  }
+
+  // Special case: an empty needle is found immediately
+  if ($needle === '')
+  {
+    return $start;
+  }
+
+  // Quick test: if the needle is longer than the part of the haystack to
+  // be searched, then we'll never find it.
+  if (count($needle_chars) > $last_haystack_index + 1 - $start)
+  {
+    return false;
+  }
+
+  // Otherwise, start searching through the haystack for the needle
+  for ($h = $start; $h <= $last_haystack_index; $h++)
+  {
+    // If we get a match with a needle character, then keep cycling through
+    // the haystack and needle. If we get to the end of the needle and all
+    // characters have matched, then we've found the needle; otherwise we
+    // reset and start looking for the needle again.
+    while (isset($haystack_chars[$h]) && isset($needle_chars[$n]) &&
+           mb_is_string_equal($haystack_chars[$h], $needle_chars[$n], $case_insensitive))
+    {
+      if ($n === $last_needle_index)
+      {
+        return $h - $n; // to get the starting index of the needle.
+      }
+      $h++;
+      $n++;
+    }
+    $n = 0;
+  }
+
+  return false;
+}
+
 
 // Constrain an integer to fit a certain type.  Useful for making sure
 // that integers will fit within the range for a database type.
@@ -34,8 +131,8 @@ function constrain_int(int $n, int $bytes, bool $unsigned=false) : int
 // See https://www.php.net/manual/en/function.in-array.php#Hcom89256
 function in_arrayi($needle, array $haystack, bool $strict=false) : bool
 {
-  return in_array(utf8_strtolower($needle),
-                  array_map(__NAMESPACE__ . "\\utf8_strtolower", $haystack),
+  return in_array(mb_strtolower($needle),
+                  array_map('mb_strtolower', $haystack),
                   $strict);
 }
 
@@ -180,19 +277,20 @@ function is_ajax() : bool
   global $server;
 
   return (isset($server['HTTP_X_REQUESTED_WITH']) &&
-          (utf8_strtolower($server['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest'));
+          (mb_strtolower($server['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest'));
 }
 
 // Returns the contents of the URL. If $if_modified_since is set it will send that in
-// an 'If-Modified-Since' header in the request.  A user agent to be used in the header
-// can be specified by $user_agent, otherwise it defaults to the browser's user agent
-// if available, otherwise the string 'PHP'.
+// an 'If-Modified-Since' header in the request.  Additional request headers can be
+// specified in $request_headers.  A user agent to be used in the header can be specified
+// by $user_agent, otherwise it defaults to the browser's user agent if available, otherwise
+// the string 'PHP'.
 //
 // The result is an associative array, indexed by
 //    'body'      The body of the response (FALSE on failure)
 //    'code'      The HTTP response code, eg 200 (NULL if none found)
 //    'headers'   An associative array of headers with the keys converted to lower case
-function url_get_contents(string $url, ?string $if_modified_since=null, ?string $user_agent=null) : array
+function url_get_contents(string $url, ?string $if_modified_since=null, ?string $user_agent=null, array $request_headers = []) : array
 {
   global $server;
 
@@ -236,9 +334,11 @@ function url_get_contents(string $url, ?string $if_modified_since=null, ?string 
     }
     if (isset($if_modified_since))
     {
-      curl_setopt($ch, CURLOPT_HTTPHEADER, array(
-          "If-Modified-Since: $if_modified_since"
-        ));
+      $request_headers[] = "If-Modified-Since: $if_modified_since";
+    }
+    if (!empty($request_headers))
+    {
+      curl_setopt($ch, CURLOPT_HTTPHEADER, $request_headers);
     }
     curl_setopt($ch, CURLOPT_HEADERFUNCTION,
       function($curl, $header) use (&$headers)
@@ -266,18 +366,16 @@ function url_get_contents(string $url, ?string $if_modified_since=null, ?string 
     // have been sent, but when the connection is closed, (b) set a timeout in case
     // the transfer is slow and (c) add a User-Agent header to prevent possible 403 errors
     // from some sites.
-    $request_header =  array(
-        "Connection: close",
-        "User-Agent: $user_agent"
-      );
+    $request_headers[] =  "Connection: close";
+    $request_headers[] = "User-Agent: $user_agent";
     if (isset($if_modified_since))
     {
-      $request_header[] = "If-Modified-Since: $if_modified_since";
+      $request_headers[] = "If-Modified-Since: $if_modified_since";
     }
     $context = stream_context_create(
         array(
             'http' => array(
-                'header' => $request_header,
+                'header' => $request_headers,
                 'timeout' => $transfer_timeout)
           )
       );
@@ -412,7 +510,7 @@ function truncate(string $value, string $column) : string
 {
   if (null !== ($maxlength = maxlength($column)))
   {
-    return utf8_substr($value, 0, $maxlength);
+    return mb_substr($value, 0, $maxlength);
   }
 
   return $value;
@@ -1366,6 +1464,25 @@ function get_duration(int $start_time, int $end_time, bool $enable_periods, int 
     toTimeString($result['duration'], $result['dur_units'], $translate);
   }
   return $result;
+}
+
+
+// Escape a PHP variable for use in HTML
+function escape_html($value)
+{
+  switch ($type = gettype($value))
+  {
+    case 'double':
+    case 'integer':
+      return $value;
+      break;
+    case 'string':
+      return htmlspecialchars($value);
+      break;
+    default:
+      throw new TypeError("Type '$type' not supported as an argument.");
+      break;
+  }
 }
 
 
@@ -2410,9 +2527,9 @@ function generate_global_uid(string $str) : string
   {
     $uid .= 'MRBS';
   }
-  elseif (utf8_strpos($server['SERVER_NAME'], 'www.') === 0)
+  elseif (mb_strpos($server['SERVER_NAME'], 'www.') === 0)
   {
-    $uid .= utf8_substr($server['SERVER_NAME'], 4);
+    $uid .= mb_substr($server['SERVER_NAME'], 4);
   }
   else
   {
@@ -2696,4 +2813,3 @@ function get_user_field(array $params, bool $datalist=false) : Field
 
   return $field;
 }
-

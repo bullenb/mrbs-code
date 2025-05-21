@@ -124,7 +124,7 @@ class DB_mysql extends DB
         }
         else
         {
-          $this->connectError($message);
+          throw new DBException($message);
         }
       }
     }
@@ -439,11 +439,11 @@ class DB_mysql extends DB
 
     if (!isset($this->db_type))
     {
-      if ((false !== utf8_stripos($this->versionComment(), 'maria')) || (false !== utf8_stripos($this->version(), 'maria')))
+      if ((false !== mb_stripos($this->versionComment(), 'maria')) || (false !== mb_stripos($this->version(), 'maria')))
       {
         $this->db_type = self::DB_MARIADB;
       }
-      elseif ((false !== utf8_stripos($this->versionComment(), 'mysql')) || (false !== utf8_stripos($this->version(), 'mysql')))
+      elseif ((false !== mb_stripos($this->versionComment(), 'mysql')) || (false !== mb_stripos($this->version(), 'mysql')))
       {
         $this->db_type = self::DB_MYSQL;
       }
@@ -455,11 +455,11 @@ class DB_mysql extends DB
       // number and the initial version check will pass, though the code may fail later on when it tries to use an unsupported feature.
       // TODO: something better. Perhaps we could also look at version numbers and then make some assumptions about whether the database
       // TODO: is MySQL or MariaDB, but that could become dangerous in the future. Or perhaps there's some other way.
-      elseif ((false !== utf8_stripos($this->versionComment(), 'ubuntu')) || (false !== utf8_stripos($this->version(), 'ubuntu')))
+      elseif ((false !== mb_stripos($this->versionComment(), 'ubuntu')) || (false !== mb_stripos($this->version(), 'ubuntu')))
       {
         $this->db_type = self::DB_MYSQL;
       }
-      elseif ((false !== utf8_stripos($this->versionComment(), 'percona')) || (false !== utf8_stripos($this->version(), 'percona')))
+      elseif ((false !== mb_stripos($this->versionComment(), 'percona')) || (false !== mb_stripos($this->version(), 'percona')))
       {
         $this->db_type = self::DB_PERCONA;
       }
@@ -648,7 +648,7 @@ class DB_mysql extends DB
         $length = null;
       }
       // Convert the is_nullable field to a boolean
-      $is_nullable = (utf8_strtolower($row['Null']) == 'yes');
+      $is_nullable = (mb_strtolower($row['Null']) == 'yes');
 
       $fields[] = array(
         'name' => $name,
@@ -668,14 +668,14 @@ class DB_mysql extends DB
   // Generate non-standard SQL for LIMIT clauses:
   public function syntax_limit(int $count, int $offset) : string
   {
-   return " LIMIT $offset,$count ";
+   return "LIMIT $offset,$count";
   }
 
 
   // Generate non-standard SQL to output a TIMESTAMP as a Unix-time:
   public function syntax_timestamp_to_unix(string $fieldname) : string
   {
-    return " UNIX_TIMESTAMP($fieldname) ";
+    return "UNIX_TIMESTAMP($fieldname)";
   }
 
 
@@ -696,7 +696,7 @@ class DB_mysql extends DB
     // authenticating a user against an external database.  See the post at
     // https://stackoverflow.com/questions/5629111/how-can-i-make-sql-case-sensitive-string-comparison-on-mysql#answer-56283818
     // for an explanation of the query.
-    return " " . $this->quote($fieldname) . "=CONVERT(? using utf8mb4) COLLATE utf8mb4_bin";
+    return $this->quote($fieldname) . "=CONVERT(? using utf8mb4) COLLATE utf8mb4_bin";
   }
 
   // Generate non-standard SQL to match a string anywhere in a field's value
@@ -715,7 +715,7 @@ class DB_mysql extends DB
 
     $params[] = "%$string%";
 
-    return " $fieldname LIKE ? ";
+    return "$fieldname LIKE ?";
   }
 
 

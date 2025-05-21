@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use Mail_mimePart;
@@ -430,7 +431,7 @@ class MailQueue
 
       $disabled_functions = ini_get('disable_functions');
 
-      if (!empty($disabled_functions) && (utf8_strpos($disabled_functions, 'escapeshell') !== FALSE)  &&
+      if (!empty($disabled_functions) && (mb_strpos($disabled_functions, 'escapeshell') !== FALSE)  &&
         in_array($mail_settings['admin_backend'], array('mail', 'sendmail')))
       {
         $message = "Your PHP system has one or both of the escapeshellarg() and escapeshellcmd() functions " .

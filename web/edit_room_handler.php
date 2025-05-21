@@ -46,32 +46,13 @@ $fields = db()->field_info(_tbl('room'));
 // Get any custom fields
 foreach($fields as $field)
 {
-  switch($field['nature'])
-  {
-    case 'character':
-      $type = 'string';
-      break;
-    case 'integer':
-      // Smallints and tinyints are considered to be booleans
-      $type = (isset($field['length']) && ($field['length'] <= 2)) ? 'string' : 'int';
-      break;
-    // We can only really deal with the types above at the moment
-    default:
-      $type = 'string';
-      break;
-  }
   $var = VAR_PREFIX . $field['name'];
-  $$var = get_form_var($var, $type);
-  if (($type == 'int') && ($$var === ''))
+  $$var = get_form_var($var, get_form_var_type($field));
+
+  // Cast booleans to ints (0 or 1) for insertion into the database
+  if (is_bool($$var))
   {
-    unset($$var);
-  }
-  // Turn checkboxes into booleans
-  if (($field['nature'] == 'integer') &&
-      isset($field['length']) &&
-      ($field['length'] <= 2))
-  {
-    $$var = (empty($$var)) ? 0 : 1;
+    $$var = intval($$var);
   }
 
   // Trim any strings and truncate them to the maximum field length
@@ -115,9 +96,6 @@ else
 
 if (empty($errors))
 {
-  // Used purely for the syntax_casesensitive_equals() call below, and then ignored
-  $sql_params = array();
-
   // Start a transaction
   db()->begin();
 

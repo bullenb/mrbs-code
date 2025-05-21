@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Form\ElementFieldset;
@@ -43,9 +44,9 @@ use MRBS\Form\Form;
 
 require "defaultincludes.inc";
 
-if ($auth['type'] != 'db')
+if (!auth()->canCreateUsers())
 {
-  // You shouldn't be here unless you're using 'db' authentication
+  // You shouldn't be here unless you can create users
   location_header('index.php');
 }
 
@@ -115,34 +116,6 @@ function can_edit_user($target)
 }
 
 
-// Get the type that should be used with get_form_var() for
-// a field which is a member of the array returned by get_field_info()
-function get_form_var_type($field)
-{
-  // "Level" is an exception because we've forced the value to be a string
-  // so that it can be used in an associative array
-  if ($field['name'] == 'level')
-  {
-    return 'string';
-  }
-  switch($field['nature'])
-  {
-    case 'character':
-      $type = 'string';
-      break;
-    case 'integer':
-      // Smallints and tinyints are considered to be booleans
-      $type = (isset($field['length']) && ($field['length'] <= 2)) ? 'string' : 'int';
-      break;
-    // We can only really deal with the types above at the moment
-    default:
-      $type = 'string';
-      break;
-  }
-  return $type;
-}
-
-
 function output_row($row)
 {
   global $is_ajax, $json_data;
@@ -171,15 +144,15 @@ function output_row($row)
   }
   else
   {
-    $display_name_value = "<span class=\"normal\">" . htmlspecialchars($row['display_name']) . "</span>";
+    $display_name_value = "<span class=\"normal\">" . escape_html($row['display_name']) . "</span>";
   }
 
   $sortname = get_sortable_name($row['display_name']);
   // TODO: move the data-order attribute up into the <td> and get rid of the <span>
-  $values[] = '<span data-order="' . htmlspecialchars($sortname) . '"></span>' . $display_name_value;
+  $values[] = '<span data-order="' . escape_html($sortname) . '"></span>' . $display_name_value;
 
   // Then the username
-  $values[] = '<span class="normal">' . htmlspecialchars($row['name']) . '</span>';
+  $values[] = '<span class="normal">' . escape_html($row['name']) . '</span>';
 
   // Other columns
   foreach ($fields as $field)
@@ -203,14 +176,14 @@ function output_row($row)
         case 'level':
           // the level field contains a code and we want to display a string
           // (but we put the code in a span for sorting)
-          $values[] = "<span title=\"$col_value\"></span>" .
+          $values[] = '<span title="' . escape_html($col_value) . '"></span>' .
                       "<div class=\"string\">" . get_vocab("level_$col_value") . "</div>";
           break;
         case 'email':
           // we don't want to truncate the email address
           if (isset($col_value) && ($col_value !== ''))
           {
-            $escaped_email = htmlspecialchars($col_value);
+            $escaped_email = escape_html($col_value);
             $values[] = "<div class=\"string\">\n" .
                         "<a href=\"mailto:$escaped_email\">$escaped_email</a>\n" .
                         "</div>\n";
@@ -221,20 +194,17 @@ function output_row($row)
           }
           break;
         case 'timestamp':
-          // Convert the SQL timestamp into a time value and back into a localised string and
-          // put the UNIX timestamp in a span so that the JavaScript can sort it properly.
-          $unix_timestamp = (isset($col_value)) ? strtotime($col_value) : 0;
-          if (($unix_timestamp === false) || ($unix_timestamp < 0))
-          {
-            // To cater for timestamps before the start of the Unix Epoch
-            $unix_timestamp = 0;
-          }
-          $values[] = "<span title=\"$unix_timestamp\"></span>" .
-                      (($unix_timestamp) ? time_date_string($unix_timestamp) : '');
-          break;
+          // Use the 'last_updated' value because it will have been converted
+          // from 'timestamp' using the correct timezone, ie the timezone of
+          // the database server.
+          $col_value = $row['last_updated'];
+          // Fall through
         case 'last_login':
-          $values[] = "<span title=\"$col_value\"></span>" .
-                      (($col_value) ? time_date_string($col_value) : '');
+          // Put the UNIX timestamp in a span so that the JavaScript can sort it properly.
+          // If there isn't a date then put '0' in the title, otherwise DataTables throws
+          // a TypeError if you try and sort the column.
+          $values[] = '<span title="' . (($col_value) ? escape_html($col_value) : '0') . '"></span>' .
+                      (($col_value) ? escape_html(time_date_string($col_value)) : '');
           break;
         default:
           // Where there's an associative array of options, display
@@ -250,7 +220,7 @@ function output_row($row)
             {
               $col_value = '';
             }
-            $values[] = "<div class=\"string\">" . htmlspecialchars($col_value) . "</div>";
+            $values[] = "<div class=\"string\">" . escape_html($col_value) . "</div>";
           }
           elseif (($field['nature'] == 'boolean') ||
               (($field['nature'] == 'integer') && isset($field['length']) && ($field['length'] <= 2)) )
@@ -270,8 +240,8 @@ function output_row($row)
             {
               $col_value = '';
             }
-            $values[] = "<div class=\"string\" title=\"" . htmlspecialchars($col_value) . "\">" .
-                        htmlspecialchars($col_value) . "</div>";
+            $values[] = "<div class=\"string\" title=\"" . escape_html($col_value) . "\">" .
+                        escape_html($col_value) . "</div>";
           }
           break;
       }  // end switch
@@ -438,6 +408,7 @@ function get_field_custom($custom_field, $params, $disabled=false)
   if ($custom_field['nature'] == 'decimal')
   {
     list( , $decimal_places) = explode(',', $custom_field['length']);
+    $decimal_places = intval($decimal_places);
     $step = pow(10, -$decimal_places);
     $step = number_format($step, $decimal_places);
     $field->setControlAttribute('step', $step);
@@ -782,7 +753,7 @@ if (isset($action) && ( ($action == "edit") or ($action == "add") ))
   }
   if (!empty($name_not_unique))
   {
-    echo "<p class=\"error\">'" . htmlspecialchars($taken_name) . "' " . get_vocab('name_not_unique') . "<p>\n";
+    echo "<p class=\"error\">'" . escape_html($taken_name) . "' " . get_vocab('name_not_unique') . "<p>\n";
   }
   if (!empty($name_empty))
   {
@@ -931,7 +902,7 @@ if (isset($action) && ($action == "update"))
               FROM " . _tbl('users') . "
              WHERE name=?
              LIMIT 1";
-    $my_id = db()->query1($sql, array(utf8_strtolower($mrbs_user->username)));
+    $my_id = db()->query1($sql, array(mb_strtolower($mrbs_user->username)));
   }
   else
   {
@@ -983,14 +954,14 @@ if (isset($action) && ($action == "update"))
         $values[$fieldname] = (empty($values[$fieldname])) ? 0 : 1;
       }
 
-      if (isset($values[$fieldname]))
+      if (is_string($values[$fieldname]))
       {
         // Trim the field to remove accidental whitespace
         $values[$fieldname] = trim($values[$fieldname]);
         // Truncate the field to the maximum length as a precaution.
         if (null !== ($maxlength = maxlength("users.$fieldname")))
         {
-          $values[$fieldname] = utf8_substr($values[$fieldname], 0, $maxlength);
+          $values[$fieldname] = mb_substr($values[$fieldname], 0, $maxlength);
         }
       }
     }
@@ -1013,7 +984,7 @@ if (isset($action) && ($action == "update"))
       case 'name':
         // name: convert it to lower case
         $q_string .= "&$fieldname=" . $values[$fieldname];
-        $values[$fieldname] = utf8_strtolower($values[$fieldname]);
+        $values[$fieldname] = mb_strtolower($values[$fieldname]);
         break;
       case 'password_hash':
         // password: if the password field is blank it means
@@ -1245,7 +1216,7 @@ if (isset($action) && ($action == "update"))
   }
 
   /* DEBUG lines - check the actual sql statement going into the db */
-  //echo "Final SQL string: <code>" . htmlspecialchars($operation) . "</code>";
+  //echo "Final SQL string: <code>" . escape_html($operation) . "</code>";
   //exit;
   db()->command($operation, $sql_params);
 
@@ -1390,7 +1361,7 @@ if ($initial_user_creation != 1)   // don't print the user table if there are no
             }
             break;
         }
-        echo '<th id="col_' . htmlspecialchars($fieldname) . "\">$heading</th>";
+        echo '<th id="col_' . escape_html($fieldname) . "\">$heading</th>";
       }
     }
 

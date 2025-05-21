@@ -166,15 +166,12 @@ function get_adjacent_link(string $view, int $view_all, int $year, int $month, i
     case 'day':
       $modifier = "$increment day";
       $date->modify($modifier);
-      if ($increment === 1)
+      // find the next non-hidden day
+      $i = 0;
+      while ($date->isHiddenDay() && ($i < DAYS_PER_WEEK)) // break the loop if all days are hidden
       {
-        // find the next non-hidden day
-        $i = 0;
-        while ($date->isHiddenDay() && ($i < DAYS_PER_WEEK)) // break the loop if all days are hidden
-        {
-          $i++;
-          $date->modify($modifier);
-        }
+        $i++;
+        $date->modify($modifier);
       }
       break;
     case 'week':
@@ -257,7 +254,7 @@ function get_view_nav(string $current_view, int $view_all, int $year, int $month
     $href = multisite("index.php?$query");
     $html .= '<a';
     $html .= ($view == $current_view) ? ' class="selected"' : '';
-    $html .= ' href="' . htmlspecialchars($href) . '">' . htmlspecialchars(get_vocab($token)) . '</a>';
+    $html .= ' href="' . escape_html($href) . '">' . escape_html(get_vocab($token)) . '</a>';
   }
 
   $html .= '</div>';
@@ -297,8 +294,8 @@ function get_arrow_nav(string $view, int $view_all, int $year, int $month, int $
       break;
   }
 
-  $title_prev = htmlspecialchars($title_prev);
-  $title_next = htmlspecialchars($title_next);
+  $title_prev = escape_html($title_prev);
+  $title_next = escape_html($title_next);
 
   $link_prev = get_adjacent_link($view, $view_all, $year, $month, $day, $area, $room, -1);
   $link_today = get_today_link($view, $view_all, $area, $room);
@@ -309,14 +306,14 @@ function get_arrow_nav(string $view, int $view_all, int $year, int $month, int $
   $html .= "<nav class=\"arrow\">\n";
   if ($view == 'day')
   {
-    $html .= "<a class=\"prev week symbol prefetch\" title=\"$title_prev_week\" aria-label=\"$title_prev_week\" href=\"" . htmlspecialchars($link_prev_week) . "\"></a>";
+    $html .= "<a class=\"prev week symbol prefetch\" title=\"$title_prev_week\" aria-label=\"$title_prev_week\" href=\"" . escape_html($link_prev_week) . "\"></a>";
   }
-  $html .= "<a class=\"prev symbol prefetch\" title=\"$title_prev\" aria-label=\"$title_prev\" href=\"" . htmlspecialchars($link_prev) . "\"></a>";
-  $html .= "<a title= \"$title_this\" aria-label=\"$title_this\" href=\"" . htmlspecialchars($link_today) . "\">" . get_vocab('today') . "</a>";
-  $html .= "<a class=\"next symbol prefetch\" title=\"$title_next\" aria-label=\"$title_next\" href=\"" . htmlspecialchars($link_next) . "\"></a>";
+  $html .= "<a class=\"prev symbol prefetch\" title=\"$title_prev\" aria-label=\"$title_prev\" href=\"" . escape_html($link_prev) . "\"></a>";
+  $html .= "<a title= \"$title_this\" aria-label=\"$title_this\" href=\"" . escape_html($link_today) . "\">" . get_vocab('today') . "</a>";
+  $html .= "<a class=\"next symbol prefetch\" title=\"$title_next\" aria-label=\"$title_next\" href=\"" . escape_html($link_next) . "\"></a>";
   if ($view == 'day')
   {
-    $html .= "<a class=\"next week symbol prefetch\" title=\"$title_next_week\" aria-label=\"$title_next_week\" href=\"" . htmlspecialchars($link_next_week) . "\"></a>";
+    $html .= "<a class=\"next week symbol prefetch\" title=\"$title_next_week\" aria-label=\"$title_next_week\" href=\"" . escape_html($link_next_week) . "\"></a>";
   }
   $html .= "</nav>";
 
@@ -437,9 +434,10 @@ if (isset($kiosk))
 
 $is_ajax = is_ajax();
 
-// If we're using the 'db' authentication type, check to see if MRBS has just been installed
+// If we're using an authentication type that supports the creation of users, eg 'db'
+// or an extension of that type, then check to see if MRBS has just been installed
 // and, if so, redirect to the edit_users page so that they can set up users.
-if (($auth['type'] == 'db') && (count(auth()->getUsers()) == 0))
+if (auth()->canCreateUsers() && (count(auth()->getUsers()) == 0))
 {
   location_header('edit_users.php');
 }

@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use MRBS\Form\ElementInputSubmit;
@@ -6,7 +7,7 @@ use MRBS\Form\Form;
 
 require "defaultincludes.inc";
 
-function display_buttons($row, $is_series)
+function display_buttons(array $row, bool $is_series) : void
 {
   global $reminders_enabled, $reminder_interval;
 
@@ -123,7 +124,7 @@ function display_buttons($row, $is_series)
 }
 
 
-function display_table_head()
+function display_table_head() : void
 {
   echo "<thead>\n";
   echo "<tr>\n";
@@ -140,20 +141,20 @@ function display_table_head()
 }
 
 // display the table head for a subtable
-function display_subtable_head($row)
+function display_subtable_head(array $row) : void
 {
   echo "<thead>\n";
   echo "<tr>\n";
   // We give some columns a type data value so that the JavaScript knows how to sort them
   echo "<th class=\"control\">&nbsp;</th>\n";
   // reservation name, with a link to the view_entry page
-  echo '<th><a href="' . htmlspecialchars(multisite('view_entry.php?id=' . $row['repeat_id'] . '&series=1')) . '">' .
-       htmlspecialchars($row['name']) ."</a></th>\n";
+  echo '<th><a href="' . escape_html(multisite('view_entry.php?id=' . $row['repeat_id'] . '&series=1')) . '">' .
+       escape_html($row['name']) ."</a></th>\n";
 
   // create_by, area and room names
-  echo "<th>" . htmlspecialchars($row['create_by']) . "</th>\n";
-  echo "<th>"   . htmlspecialchars($row['area_name']) . "</th>\n";
-  echo "<th>"   . htmlspecialchars($row['room_name']) . "</th>\n";
+  echo "<th>" . escape_html($row['create_by']) . "</th>\n";
+  echo "<th>" . escape_html($row['area_name']) . "</th>\n";
+  echo "<th>" . escape_html($row['room_name']) . "</th>\n";
 
   echo "<th><span class=\"normal\" data-type=\"title-numeric\">" . get_vocab("series") . "</span></th>\n";
 
@@ -164,18 +165,18 @@ function display_subtable_head($row)
 
 
 // display the title row for a series
-function display_series_title_row($row)
+function display_series_title_row(array $row) : void
 {
   echo "<tr id=\"row_" . $row['repeat_id'] . "\">\n";
   echo "<td class=\"control\">&nbsp;</td>\n";
   // reservation name, with a link to the view_entry page
-  echo '<td><a href="' . htmlspecialchars(multisite('view_entry.php?id=' . $row['repeat_id'] . '&series=1')) . '">' .
-        htmlspecialchars($row['name']) ."</a></td>\n";
+  echo '<td><a href="' . escape_html(multisite('view_entry.php?id=' . $row['repeat_id'] . '&series=1')) . '">' .
+        escape_html($row['name']) ."</a></td>\n";
 
   // create_by, area and room names
-  echo "<td>" . htmlspecialchars(auth()->getDisplayName($row['create_by'])) . "</td>\n";
-  echo "<td>" . htmlspecialchars($row['area_name']) . "</td>\n";
-  echo "<td>" . htmlspecialchars($row['room_name']) . "</td>\n";
+  echo "<td>" . escape_html(auth()->getDisplayName($row['create_by'])) . "</td>\n";
+  echo "<td>" . escape_html($row['area_name']) . "</td>\n";
+  echo "<td>" . escape_html($row['room_name']) . "</td>\n";
 
   echo "<td>";
   // <span> for sorting
@@ -190,7 +191,7 @@ function display_series_title_row($row)
 }
 
 // display an entry in a row
-function display_entry_row(array $row)
+function display_entry_row(array $row) : void
 {
   global $view;
 
@@ -199,13 +200,13 @@ function display_entry_row(array $row)
 
   // reservation name, with a link to the view_entry page
   echo "<td>";
-  echo '<a href="' . htmlspecialchars(multisite('view_entry.php?id=' . $row['id'])) . '">' .
-        htmlspecialchars($row['name']) ."</a></td>\n";
+  echo '<a href="' . escape_html(multisite('view_entry.php?id=' . $row['id'])) . '">' .
+        escape_html($row['name']) ."</a></td>\n";
 
   // create_by, area and room names
-  echo "<td>" . htmlspecialchars(auth()->getDisplayName($row['create_by'])) . "</td>\n";
-  echo "<td>" . htmlspecialchars($row['area_name']) . "</td>\n";
-  echo "<td>" . htmlspecialchars($row['room_name']) . "</td>\n";
+  echo "<td>" . escape_html(auth()->getDisplayName($row['create_by'])) . "</td>\n";
+  echo "<td>" . escape_html($row['area_name']) . "</td>\n";
+  echo "<td>" . escape_html($row['room_name']) . "</td>\n";
 
   // start date, with a link to the calendar view
   $link = getdate($row['start_time']);
@@ -222,7 +223,7 @@ function display_entry_row(array $row)
 
   $query = http_build_query($vars, '', '&');
 
-  echo '<a href="' . htmlspecialchars(multisite("index.php?$query")) . '">';
+  echo '<a href="' . escape_html(multisite("index.php?$query")) . '">';
 
   if(empty($row['enable_periods']))
   {
@@ -233,7 +234,7 @@ function display_entry_row(array $row)
     list(,$link_str) = period_date_string($row['start_time'], $row['area_id']);
   }
 
-  echo htmlspecialchars($link_str) . "</a></td>";
+  echo escape_html($link_str) . "</a></td>";
 
   // action buttons
   echo "<td>\n";
@@ -293,6 +294,12 @@ $rows = array();
 
 while (false !== ($row = $res->next_row_keyed()))
 {
+  row_cast_columns($row, 'entry');
+  // Turn these columns into ints (some MySQL drivers will return a string,
+  // and they won't have been caught by row_cast_columns() as they are derived results).
+  $row['last_updated'] = intval($row['last_updated']);
+  $row['entry_info_time'] = intval($row['entry_info_time']);
+  $row['repeat_info_time'] = intval($row['repeat_info_time']);
   if ((strcasecmp_locale($row['create_by'], $mrbs_username) === 0) || is_book_admin($row['room_id']))
   {
     $rows[] = $row;

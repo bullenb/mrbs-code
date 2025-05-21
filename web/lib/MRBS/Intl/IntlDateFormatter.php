@@ -18,7 +18,6 @@ use MRBS\System;
 use function MRBS\convert_to_BCP47;
 use function MRBS\get_mrbs_locale;
 use function MRBS\set_mrbs_locale;
-use function MRBS\utf8_strlen;
 
 // We need to check that the 'intl' extension is loaded because earlier versions of
 // MRBS had the IntlDateFormatter emulation class at the top level in lib.  If users
@@ -73,6 +72,13 @@ class IntlDateFormatter
     if (!function_exists('strftime'))
     {
       throw new Exception("Neither the IntlDateFormatter class nor the strftime() function exist on this server");
+    }
+    // Emulate PHP 8.4 and later by detecting invalid locales now, in order to avoid problems later on.
+    if (isset($locale) && !System::isAvailableLocale($locale))
+    {
+      $message = 'Argument #1 ($locale) "' . $locale . '" is invalid';
+      $throwable = (version_compare(PHP_VERSION, '8.0') >= 0) ? '\ValueError' : '\Exception';
+      throw new $throwable($message);
     }
     $this->locale = $locale;
     $this->dateType = $dateType;
@@ -203,7 +209,13 @@ class IntlDateFormatter
     // so we need to find out which locale actually worked.
     if (!empty($this->locale)) {
       $old_locale = setlocale(LC_TIME, '0');
-      $new_locale = setlocale(LC_TIME, System::getOSlocale($this->locale));
+      if (false === ($new_locale = setlocale(LC_TIME, System::getOSlocale($this->locale))))
+      {
+        $new_locale = $old_locale;
+        $locale = is_array($this->locale) ? json_encode($this->locale) : "'$this->locale'";
+        $message = "Could not set locale to $locale; continuing to use '$old_locale'";
+        trigger_error($message, E_USER_WARNING);
+      }
     }
     elseif ($server_os == "windows") {
       // If we are running Windows we have to set the locale again in case another script
@@ -276,7 +288,7 @@ class IntlDateFormatter
     $tokens = self::parseStrftimeFormat($format);
 
     foreach ($tokens as $token) {
-      if (utf8_strlen($token) === 1) {
+      if (mb_strlen($token) === 1) {
         $result .= $token;
       }
       else {

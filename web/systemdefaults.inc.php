@@ -143,6 +143,25 @@ $db_options['mysql']['ssl_verify_server_cert'] = null;  // boolean
 // There are none at the moment.
 
 
+/******************
+ * System settings
+ ******************/
+
+// The $ini_directives setting can be used to set php.ini directives.  This can
+// be useful if (a) you don't have easy access to the php.ini file or (b) in
+// multisite mode when you want to have different settings for different sites.
+// Only settings that can be set in user scripts (INI_USER) may be used.  For
+// more details see https://www.php.net/manual/en/ini.list.php.
+// This should be an associative array indexed by option, for example:
+// $ini_directives = [
+//   'memory_limit' => '64M',
+//   'session.gc_probability' => 1,
+//   'session.gc_divisor' => 100,
+//   'session.gc_maxlifetime' => 90*24*60*60  // 90 days
+// ];
+$ini_directives = [];
+
+
 /*********************************
  * Site identification information
  *********************************/
@@ -405,8 +424,11 @@ $holidays = array();
 // by defining some custom CSS for the .hidden_day class.
 $hidden_days = array();
 
-// Whether or not to display the timezone
+// Whether to display the timezone
 $display_timezone = false;
+
+// Whether to scroll automatically so that the current time slot is in view
+$autoscroll = true;
 
 // Results per page for searching:
 $search["count"] = 20;
@@ -778,6 +800,10 @@ $force_srtftime = false;
 /************************
  * Miscellaneous settings
  ************************/
+
+// Default booking duration when using periods.  (The default duration when using
+// times is specified in areadefaults.inc.php.)
+$default_duration_periods = 1; // Number of periods
 
 // Maximum repeating entries (max needed +1):
 $max_rep_entrys = 365 + 1;
@@ -1545,6 +1571,9 @@ $auth['show_registrant_names_in_public_calendar'] = false;
 // Set this to true if you want ordinary users to be able to register others.
 $auth['users_can_register_others'] = false;
 
+// Set this to true if you want ordinary users to be able to delete other users' registrations.
+$auth['users_can_delete_others_registrations'] = false;
+
 // Set this to true if you don't want admins to be able to make bookings
 // on behalf of other users
 $auth['admin_can_only_book_for_self'] = false;
@@ -1602,8 +1631,9 @@ $mail_settings['use_from_for_all_mail'] = false;
 // false in order not to set a Reply-To address.
 $mail_settings['use_reply_to'] = true;
 
-// The address to be used for the ORGANIZER in an iCalendar event.   Do not make
-// this email address the same as the admin email address or the recipients
+// The address to be used for the ORGANIZER in an iCalendar event.  The address should
+// be an RFC822-style address of the form "display name <address>" or just "address".
+// Do not make this email address the same as the admin email address or the recipients
 // email address because on some mail systems, eg IBM Domino, the iCalendar email
 // notification is silently discarded if the organizer's email address is the same
 // as the recipient's.  On other systems you may get a "Meeting not found" message.

@@ -2440,7 +2440,7 @@ button#delete_button {
 
 h3.search_results {
   clear: left;
-  margin-bottom: 0;
+  margin-bottom: 1em;
   padding-top: 2em;
 }
 
@@ -2501,6 +2501,13 @@ div#site_faq_body {
 
 #site_faq_body :target {
   background-color: <?php echo $help_highlight_color ?>;
+}
+
+
+/* ------------- UPGRADE.INC -------------*/
+
+.upgrade_nav {
+  margin-top: 3em;
 }
 
 

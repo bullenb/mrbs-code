@@ -126,6 +126,24 @@ function getDataName(jqObject)
 }
 
 
+<?php
+// The object ui.element is only altered when the resize stops, so we can only
+// get its current position and size using ui.position and ui.size. This function
+// creates an invisible element in the DOM with the same position and size as
+// ui.element would have when resizing stops. This clone is useful for passing to
+// functions that expect a jQuery object looking like the eventual ui.element.
+?>
+function uiDummyClone(ui)
+{
+  return $('<div></div>')
+    .css('position', 'absolute')
+    .appendTo($('body'))
+    .offset(ui.position)
+    .width(ui.size.width)
+    .height(ui.size.height);
+}
+
+
 var Table = {
   selector: ".dwm_main",
   borderLeftWidth: undefined,
@@ -288,6 +306,7 @@ var Table = {
       });
     <?php // Size the table ?>
     Table.size();
+    Table.sizeTbodyViewport();
   },
 
 
@@ -350,28 +369,27 @@ var Table = {
   },
 
 
-  <?php
-  // Clip the element (typically the ui.helper) so that it doesn't protrude above the top
-  // of the table body
-  ?>
-  setClipPath: function(el) {
-      var path = 'none';
-      <?php
-      // Because we have shifted the th cells using JavaScript to give the effect of a sticky
-      // header, we have to look at the th cells rather than the thead.
-      ?>
-      var th = $(Table.selector).find('thead tr:last-child th:first-child');
-      var theadBottom = th.offset().top + th.outerHeight();
-      var elTop = el.offset().top;
-      var elHeight = el.outerHeight();
-      var above = theadBottom - elTop;
+  <?php // Clip the ui.helper so that it doesn't protrude outside the table body. ?>
+  setClipPath: function(ui) {
+      const top = Table.tbodyViewport.top - ui.position.top;
+      const right = ui.position.left + ui.size.width - Table.tbodyViewport.right;
+      const bottom = ui.position.top + ui.size.height - Table.tbodyViewport.bottom;
+      const left = Table.tbodyViewport.left - ui.position.left;
 
-      if (above > 0)
+      let path = 'none';
+
+      if ((top > 0) || (right > 0) || (bottom > 0) || (left > 0))
       {
-        path = 'inset(' + above + 'px 0 0 0)';
+        <?php // Set the top, right, bottom and left offsets ?>
+        let offsets = [];
+        offsets.push((top > 0) ? top + 'px' : '0');
+        offsets.push((right > 0) ? right + 'px' : '0');
+        offsets.push((bottom > 0) ? bottom + 'px' : '0');
+        offsets.push((left > 0) ? left + 'px' : '0');
+        path = 'inset(' + offsets.join(' ') + ')';
       }
 
-      el.css('clip-path', path);
+      ui.helper.css('clip-path', path);
     },
 
   scrollContainerBy: function(xCoord, yCoord) {
@@ -386,6 +404,70 @@ var Table = {
       left: xCoord,
       behavior: 'instant'
     });
+  },
+
+  <?php
+  // Calculate the amount by which the table container should be scrolled given an event 'e'.
+  // Returns an object with 'x' and 'y' properties.
+  ?>
+  scrollDelta: function(e) {
+    <?php
+    // Set the distance from the edge of the visible tbody at which we should start scrolling.
+    // It should not be more than half the height/width of the visible tbody
+    ?>
+    const scrollGapX = Math.min(30, Math.floor((Table.tbodyViewport.right - Table.tbodyViewport.left)/2));
+    const scrollGapY = Math.min(30, Math.floor((Table.tbodyViewport.bottom - Table.tbodyViewport.top)/2));
+    const table = $(Table.selector);
+    const tableContainer = table.parent();
+    let result = {x: 0, y: 0};
+
+    <?php // First check whether we are approaching the top. ?>
+    if ((e.pageY - Table.tbodyViewport.top) < scrollGapY)
+    {
+      <?php // Don't go beyond the top ?>
+      result.y = -Math.min(scrollGapY, tableContainer.scrollTop());
+    }
+
+    <?php // Then whether we are approaching the bottom. ?>
+    else if ((Table.tbodyViewport.bottom - e.pageY) < scrollGapY)
+    {
+      <?php // Don't go beyond the bottom ?>
+      result.y = Math.min(scrollGapY, table.outerHeight() - tableContainer.outerHeight() - tableContainer.scrollTop());
+      result.y = Math.max(result.y, 0);
+      <?php
+      // In Chrome, when the browser is zoomed the pixel numbers can be floating, so round down anything less than 1.
+      // See https://stackoverflow.com/questions/5828275/how-to-check-if-a-div-is-scrolled-all-the-way-to-the-bottom-with-jquery
+      ?>
+      if (result.y < 1)
+      {
+        result.y = 0;
+      }
+    }
+
+    <?php // Then the left hand side ?>
+    if ((e.pageX - Table.tbodyViewport.left) < scrollGapX)
+    {
+      <?php // Don't go beyond the left hand side ?>
+      result.x = -Math.min(scrollGapX, tableContainer.scrollLeft());
+    }
+
+    <?php // And finally the right ?>
+    else if ((Table.tbodyViewport.right - e.pageX) < scrollGapX)
+    {
+      <?php // Don't go beyond the bottom ?>
+      result.x = Math.min(scrollGapX, table.outerWidth() - tableContainer.outerWidth() - tableContainer.scrollLeft());
+      result.x = Math.max(result.x, 0);
+      <?php
+      // In Chrome, when the browser is zoomed the pixel numbers can be floating, so round down anything less than 1.
+      // See https://stackoverflow.com/questions/5828275/how-to-check-if-a-div-is-scrolled-all-the-way-to-the-bottom-with-jquery
+      ?>
+      if (result.x < 1)
+      {
+        result.x = 0;
+      }
+    }
+
+    return result;
   },
 
   size: function() {
@@ -498,6 +580,24 @@ var Table = {
         });
     }, <?php // size() ?>
 
+  <?php // Get the boundaries of the visible part of the tbody. ?>
+  sizeTbodyViewport: function() {
+    const table = $(Table.selector);
+    const tableContainer = table.parent();
+    const thead = table.find('thead');
+    const tfoot = table.find('tfoot');
+    const tfootHeight = (tfoot.length) ? tfoot.outerHeight() : 0;
+    const tbodyFirstRowTh = table.find('tbody tr:first th');
+    const tbodyRightTh = tbodyFirstRowTh.eq(2);
+    const tbodyRightThWidth = (tbodyRightTh.length) ? tbodyRightTh.outerWidth() : 0;
+
+    Table.tbodyViewport = {
+      top: tableContainer.offset().top + thead.outerHeight(),
+      left: tableContainer.offset().left + tbodyFirstRowTh.first().outerWidth(),
+      bottom: tableContainer.offset().top + tableContainer.outerHeight() - tfootHeight,
+      right: tableContainer.offset().left + tableContainer.outerWidth() - tbodyRightThWidth
+    };
+  }, <?php // sizeTbodyViewport() ?>
 
   <?php
   // Given an object 'obj', calculate the changes that must be made to its position,
@@ -708,33 +808,18 @@ var Table = {
   ?>
   snapUiToGrid: function (ui, side, force) {
     <?php
-    // The object ui.element is only altered when the resize stops, so we can only
-    // get its current position and size using ui.position and ui.size. We therefore
-    // create a new element in the DOM and give it the same position and size as
-    // ui.element and pass that object to snapDelta().  (We could of course modify
-    // snapDelta() so that it takes position and size as parameters instead of an object.)
-    ?>
-    const obj = $('<div></div>')
-      .css('position', 'absolute')
-      .appendTo($('body'))
-      .offset(ui.position)
-      .width(ui.size.width)
-      .height(ui.size.height);
-
-    <?php
     // Get the changes that must be made to the UI element and apply them by updating
     // ui.position and ui.size.  The Helper element will automatically follow the
     // new position and size.
     ?>
+    const obj = uiDummyClone(ui);
     const delta = this.snapDelta(obj, side, force);
+    obj.remove();  <?php // Remove the object so it doesn't clutter the DOM. ?>
 
     ui.position.top += delta.top;
     ui.position.left += delta.left;
     ui.size.width += delta.width;
     ui.size.height += delta.height;
-
-    <?php // Remove the object we've created so it doesn't clutter the DOM. ?>
-    obj.remove();
   }
 
 };
@@ -743,21 +828,86 @@ var Table = {
 <?php
 // Add scroll positions, if any, of a jQuery object to the location.
 // This enables the scroll position to be preserved after a booking
-// has been made.
+// has been made.  The originalScroll parameter is an object with left
+// and top properties giving the original scroll positions of object.
+// The scroll positions that are added are the minima of the current and
+// original positions.  We do this so that the top left of the booking,
+// and thus the brief description is in view when the booking has been
+// saved and MRBS returns to the calendar (index) page.
 ?>
-function addScrollPosition(location, object)
+function addScrollPosition(location, object, originalScroll)
 {
   if (object.isHScrollable())
   {
-    location += '&left=' + encodeURIComponent(object.scrollLeft());
+    location += '&left=' + encodeURIComponent(Math.min(object.scrollLeft(), originalScroll.left));
   }
   if (object.isVScrollable())
   {
-    location += '&top=' + encodeURIComponent(object.scrollTop());
+    location += '&top=' + encodeURIComponent(Math.min(object.scrollTop(), originalScroll.top));
   }
 
   return location;
 }
+
+
+<?php
+// Extend the jQuery UI resizable widget so that we can scroll the container.  When the
+// container is scrolled we need to be able to change some of the ui variables which we
+// don't have access to from the standard widget.
+
+// The extension offers two additional options:
+//
+//    scrollableContainer   A jQuery object representing the element that can be scrolled.
+//                          Default: null
+//    scrollDelta           A function that returns the amount by which the container must
+//                          be scrolled on a given event.  Returns an object with x and y
+//                          properties.  Default: null
+?>
+$.widget('ui.resizable', $.ui.resizable, {
+  options: {
+    scrollableContainer: null,
+    scrollDelta: null
+  },
+  _mouseDrag: function(event) {
+    if (this.options.scrollableContainer && this.options.scrollDelta)
+    {
+      <?php // Calculate the amount to scroll by. ?>
+      const delta = this.options.scrollDelta.call(this, event);
+
+      if (delta.x || delta.y)
+      {
+        <?php // Scroll the container. ?>
+        this.options.scrollableContainer[0].scrollBy({
+          top: delta.y,
+          left: delta.x,
+          behavior: 'instant'
+        });
+        <?php
+        // Adjust the original mouse position and the original, current and previous positions.
+        ?>
+        ['originalMousePosition', 'originalPosition', 'position', 'prevPosition'].forEach((property) => {
+          if (delta.x) {
+            this[property].left -= delta.x;
+          }
+          if (delta.y) {
+            this[property].top -= delta.y;
+          }
+        });
+        <?php // Adjust the position of the helper. ?>
+        const helperOffset = this.helper.offset();
+        this.helper.css({
+          top: (helperOffset.top - delta.y) + 'px',
+          left: (helperOffset.left - delta.x) + 'px'
+        });
+        <?php // Resize the table to adjust the position of existing bookings and grid lines. ?>
+        Table.size();
+      }
+    }
+
+    // Invoke the parent widget's _mouseDrag().
+    return this._super(event);
+  }
+});
 
 
 $(document).on('page_ready', function() {
@@ -788,28 +938,11 @@ $(document).on('page_ready', function() {
   $(Table.selector).on('tableload', function() {
       var table = $(this);
       var tableContainer = table.parent();
-      var thead = table.find('thead');
-      var tfoot = table.find('tfoot');
-      var tfootHeight = (tfoot.length) ? tfoot.outerHeight() : 0;
-      var tbodyFirstRowTh = table.find('tbody tr:first th');
-      var tbodyRightTh = tbodyFirstRowTh.eq(2);
-      var tbodyRightThWidth = (tbodyRightTh.length) ? tbodyRightTh.outerWidth() : 0;
-      <?php
-      // Get the boundaries of the visible part of the tbody. We will need them to decide
-      // whether we need to scroll.
-      ?>
-      var tbodyViewport = {
-        top: tableContainer.offset().top + thead.outerHeight(),
-        left: tableContainer.offset().left + tbodyFirstRowTh.first().outerWidth(),
-        bottom: tableContainer.offset().top + tableContainer.outerHeight() - tfootHeight,
-        right: tableContainer.offset().left + tableContainer.outerWidth() - tbodyRightThWidth
-      };
 
       <?php
       // Don't do anything if this is an empty table, or the all-rooms week view,
       // or the month view
       ?>
-
       if ((args.view === 'month') ||
           ((args.view === 'week') && args.view_all) ||
           table.find('tbody').data('empty'))
@@ -823,6 +956,12 @@ $(document).on('page_ready', function() {
 
       var downHandler = function(e) {
           mouseDown = true;
+
+          <?php // Save the original scroll position ?>
+          downHandler.originalScroll = {
+            left: tableContainer.scrollLeft(),
+            top: tableContainer.scrollTop()
+          };
 
           <?php
           // Apply a class so that we know that resizing is in progress, eg to turn off
@@ -884,19 +1023,6 @@ $(document).on('page_ready', function() {
         };
 
       var moveHandler = function(e) {
-          var box = downHandler.box;
-          var oldBoxOffset = box.offset();
-          var oldBoxWidth = box.outerWidth();
-          var oldBoxHeight = box.outerHeight();
-          <?php
-          // Set the distance from the edge of the visible tbody at which we should start scrolling.
-          // It should not be more than half the height/width of the visible tbody
-          ?>
-          var scrollGapX = Math.min(30, Math.floor((tbodyViewport.right - tbodyViewport.left)/2));
-          var scrollGapY = Math.min(30, Math.floor((tbodyViewport.bottom - tbodyViewport.top)/2));
-          var xDelta = 0,
-              yDelta = 0;
-
           <?php
           // Check to see if we're only allowed to go one slot wide/high
           // and have gone over that limit.  If so, do nothing and return
@@ -907,60 +1033,16 @@ $(document).on('page_ready', function() {
             return;
           }
 
-          <?php
-          // Scroll the table if necessary.
-          // First check whether we are approaching the top.
-          ?>
-          if ((e.pageY - tbodyViewport.top) < scrollGapY)
-          {
-            <?php // Don't go beyond the top ?>
-            yDelta = -Math.min(scrollGapY, tableContainer.scrollTop());
-          }
+          const box = downHandler.box;
+          const oldBoxOffset = box.offset();
+          const oldBoxWidth = box.outerWidth();
+          const oldBoxHeight = box.outerHeight();
+          const delta = Table.scrollDelta(e);
 
-          <?php
-          // Then whether we are approaching the bottom.
-          ?>
-          else if ((tbodyViewport.bottom - e.pageY) < scrollGapY)
+          <?php // Scroll the table if necessary ?>
+          if (delta.x || delta.y)
           {
-            <?php // Don't go beyond the bottom ?>
-            yDelta = Math.min(scrollGapY, table.outerHeight() - tableContainer.outerHeight() - tableContainer.scrollTop());
-            yDelta = Math.max(yDelta, 0);
-            <?php
-            // In Chrome, when the browser is zoomed the pixel numbers can be floating, so round down anything less than 1.
-            // See https://stackoverflow.com/questions/5828275/how-to-check-if-a-div-is-scrolled-all-the-way-to-the-bottom-with-jquery
-            ?>
-            if (yDelta < 1)
-            {
-              yDelta = 0;
-            }
-          }
-
-          <?php // Then the left hand side ?>
-          if ((e.pageX - tbodyViewport.left) < scrollGapX)
-          {
-            <?php // Don't go beyond the left hand side ?>
-            xDelta = -Math.min(scrollGapX, tableContainer.scrollLeft());
-          }
-
-          <?php // And finally the right ?>
-          else if ((tbodyViewport.right - e.pageX) < scrollGapX)
-          {
-            <?php // Don't go beyond the bottom ?>
-            xDelta = Math.min(scrollGapX, table.outerWidth() - tableContainer.outerWidth() - tableContainer.scrollLeft());
-            xDelta = Math.max(xDelta, 0);
-            <?php
-            // In Chrome, when the browser is zoomed the pixel numbers can be floating, so round down anything less than 1.
-            // See https://stackoverflow.com/questions/5828275/how-to-check-if-a-div-is-scrolled-all-the-way-to-the-bottom-with-jquery
-            ?>
-            if (xDelta < 1)
-            {
-              xDelta = 0;
-            }
-          }
-
-          if (xDelta || yDelta)
-          {
-            Table.scrollContainerBy(xDelta, yDelta);
+            Table.scrollContainerBy(delta.x, delta.y);
             <?php
             // Need to resize the table after a scroll because the coordinates
             // of the grid lines and booked cells will have changed.
@@ -972,10 +1054,10 @@ $(document).on('page_ready', function() {
             // Because we've scrolled we need to correct the positions of
             // downHandler.firstPosition and oldBoxOffset.
             ?>
-            downHandler.firstPosition.x -= xDelta;
-            downHandler.firstPosition.y -= yDelta;
-            oldBoxOffset.left -= xDelta;
-            oldBoxOffset.top -= yDelta;
+            downHandler.firstPosition.x -= delta.x;
+            downHandler.firstPosition.y -= delta.y;
+            oldBoxOffset.left -= delta.x;
+            oldBoxOffset.top -= delta.y;
           }
 
           <?php // Otherwise redraw the box ?>
@@ -1004,8 +1086,8 @@ $(document).on('page_ready', function() {
           // Snap the box to grid boundaries if it's close, and even if it's not
           // if you're dragging away from that edge.
           ?>
-          var draggingDown = (e.pageY > downHandler.firstPosition.y);
-          var draggingRight = (e.pageX > downHandler.firstPosition.x);
+          const draggingDown = (e.pageY > downHandler.firstPosition.y);
+          const draggingRight = (e.pageX > downHandler.firstPosition.x);
           Table.snapToGrid(box, 'top', draggingDown);
           Table.snapToGrid(box, 'left', draggingRight);
           Table.snapToGrid(box, 'bottom', !draggingDown);
@@ -1082,7 +1164,7 @@ $(document).on('page_ready', function() {
           {
             if (downHandler.originalLink !== undefined)
             {
-              window.location = addScrollPosition(downHandler.originalLink, tableContainer);
+              window.location = addScrollPosition(downHandler.originalLink, tableContainer, downHandler.originalScroll);
             }
             else
             {
@@ -1116,7 +1198,7 @@ $(document).on('page_ready', function() {
           {
             queryString += '&site=' + encodeURIComponent(args.site);
           }
-          window.location = addScrollPosition('edit_entry.php?' + queryString, tableContainer);
+          window.location = addScrollPosition('edit_entry.php?' + queryString, tableContainer, downHandler.originalScroll);
         };
 
 
@@ -1128,11 +1210,6 @@ $(document).on('page_ready', function() {
         var closest,
             rectangle = {},
             sides = {n: false, s: false, e: false, w: false};
-
-        if (resize.lastRectangle === undefined)
-        {
-          resize.lastRectangle = $.extend({}, resizeStart.originalRectangle);
-        }
 
         <?php
         // Get the sides of the desired rectangle and also the direction(s) of
@@ -1186,8 +1263,17 @@ $(document).on('page_ready', function() {
         // Get all the bookings that the desired rectangle would overlap.  Note
         // that it could overlap more than one other booking, so we need to find them
         // all and then find the closest one.
+
+        // Recalculate the original rectangle which will have move if we have scrolled.
         ?>
-        var overlappedElements = Table.overlapsBooked(rectangle, false, resizeStart.originalRectangle);
+        const originalRectangle = {
+          n: ui.originalPosition.top,
+          s: ui.originalPosition.top + ui.originalSize.height,
+          w: ui.originalPosition.left,
+          e: ui.originalPosition.left + ui.originalSize.width
+        };
+
+        var overlappedElements = Table.overlapsBooked(rectangle, false, originalRectangle);
 
         if (!overlappedElements.length)
         {
@@ -1286,11 +1372,11 @@ $(document).on('page_ready', function() {
           Table.snapUiToGrid(ui, 'bottom');
         }
 
-        resize.lastRectangle = $.extend({}, rectangle);
+        const obj = uiDummyClone(ui);
+        Table.highlightRowLabels(obj);
+        obj.remove();
 
-        Table.highlightRowLabels(ui.helper);
-
-        Table.setClipPath(ui.helper);
+        Table.setClipPath(ui);
       };  <?php // resize ?>
 
 
@@ -1302,13 +1388,6 @@ $(document).on('page_ready', function() {
         resizeStart.originalOffset = ui.element.offset();
 
         resizeStart.oldParams = Table.getBookingParams(ui.originalElement.find('a'));
-
-        resizeStart.originalRectangle = {
-            n: ui.originalPosition.top,
-            s: ui.originalPosition.top + ui.originalSize.height,
-            w: ui.originalPosition.left,
-            e: ui.originalPosition.left + ui.originalSize.width
-          };
 
         <?php
         // Add a class so that we can disable the highlighting when we are
@@ -1331,7 +1410,15 @@ $(document).on('page_ready', function() {
             Table.snapUiToGrid(ui, side, true);
           });
 
-        if (rectanglesIdentical(resizeStart.originalRectangle, getSides(ui.helper)))
+        <?php // Recalculate the original rectangle which will have move if we have scrolled. ?>
+        const originalRectangle = {
+            n: ui.originalPosition.top,
+            s: ui.originalPosition.top + ui.originalSize.height,
+            w: ui.originalPosition.left,
+            e: ui.originalPosition.left + ui.originalSize.width
+          };
+
+        if (rectanglesIdentical(originalRectangle, getSides(ui.helper)))
         {
           <?php
           // Restore the proper height and width so that if the browser zoom
@@ -1614,11 +1701,15 @@ $(document).on('page_ready', function() {
 
             if (handles)
             {
-              $(this).resizable({handles: handles,
-                                 helper: 'resizable-helper',
-                                 start: resizeStart,
-                                 resize: resize,
-                                 stop: resizeStop});
+              $(this).resizable({
+                handles: handles,
+                helper: 'resizable-helper',
+                start: resizeStart,
+                resize: resize,
+                stop: resizeStop,
+                scrollableContainer: tableContainer,
+                scrollDelta: Table.scrollDelta
+              });
             }
 
             $(this).css('background-color', 'transparent');

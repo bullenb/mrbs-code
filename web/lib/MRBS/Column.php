@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 use ReflectionClass;
@@ -25,7 +26,7 @@ class Column
   private $type;
 
 
-  public function __construct($table, $name)
+  public function __construct(string $table, string $name)
   {
     $this->table = $table;
     $this->name = $name;
@@ -38,43 +39,46 @@ class Column
   }
 
 
-  public function setDefault($default)
+  public function setDefault($default) : void
   {
     $this->default = $default;
   }
 
 
-  public function getIsNullable()
+  public function getIsNullable() : bool
   {
     return $this->is_nullable;
   }
 
 
-  public function setIsNullable($is_nullable)
+  public function setIsNullable(bool $is_nullable) : void
   {
     $this->is_nullable = $is_nullable;
   }
 
 
+  // Returns the column length.  Can be null|int|string
+  // For example a DECIMAL might return "5,2".
   public function getLength()
   {
     return $this->length;
   }
 
 
-  public function setLength($length)
+  // $length can be null|int|string
+  public function setLength($length) : void
   {
-    $this->length = intval($length);
+    $this->length = $length;
   }
 
 
-  public function getNature()
+  public function getNature() : int
   {
     return $this->nature;
   }
 
 
-  public function setNature($nature)
+  public function setNature(int $nature) : void
   {
     $reflectionClass = new ReflectionClass($this);
     $constants = $reflectionClass->getConstants();
@@ -97,7 +101,7 @@ class Column
     $this->type = $type;
   }
 
-  // Gets the type ('bool', 'int' or 'string') to be used with get_form_var().
+  // Gets the type ('bool', 'decimal', 'float', 'int' or 'string') to be used with get_form_var().
   // TODO: this method maybe doesn't belong here.
   public function getFormVarType() : string
   {
@@ -111,6 +115,9 @@ class Column
         break;
       case self::NATURE_INTEGER:
         $var_type = ($this->isBooleanLike()) ? 'bool' : 'int';
+        break;
+      case self::NATURE_REAL:
+        $var_type = 'float';
         break;
       // We can only really deal with the types above at the moment
       default:
@@ -177,7 +184,7 @@ class Column
         isset($this->length) &&
         ($this->length < 256))
     {
-      $result = utf8_substr($value, 0, $this->length);
+      $result = mb_substr($value, 0, intval($this->length));
     }
 
     return $result;

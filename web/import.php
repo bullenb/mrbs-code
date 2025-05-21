@@ -44,7 +44,7 @@ function get_compression_wrappers() : array
     foreach ($wrappers as $wrapper)
     {
       if ((($wrapper == 'zip') && class_exists('ZipArchive')) ||
-          (utf8_strpos($wrapper, 'compress.') === 0))
+          (mb_strpos($wrapper, 'compress.') === 0))
       {
         $result[] = $wrapper;
       }
@@ -63,7 +63,7 @@ function get_room_id($location, &$error)
 
   // If there's no delimiter we assume we've just been given a room name (that will
   // have to be unique).   Otherwise we split the location into its area and room parts
-  if (utf8_strpos($location, $area_room_delimiter) === false)
+  if (mb_strpos($location, $area_room_delimiter) === false)
   {
     $location_area = '';
     $location_room = $location;
@@ -218,12 +218,12 @@ function get_unfolded_line($handle)
     }
     else
     {
-      $first_char = utf8_substr($line, 0, 1);
+      $first_char = mb_substr($line, 0, 1);
       // If the first character of the line is a space or tab then it's
       // part of a fold
       if (($first_char == " ") || ($first_char == "\t"))
       {
-        $unfolded_line .= utf8_substr($line, 1);
+        $unfolded_line .= mb_substr($line, 1);
       }
       // Otherwise we've reached the start of the next unfolded line, so
       // save it for next time and finish
@@ -598,11 +598,11 @@ function process_event(array $vevent) : bool
   }
   // There were problems - list them
   echo "<div class=\"problem_report\">\n";
-  echo htmlspecialchars(get_vocab("could_not_import", $booking['name'], $booking['ical_uid']));
+  echo escape_html(get_vocab("could_not_import", $booking['name'], $booking['ical_uid']));
   echo "<ul>\n";
   foreach ($problems as $problem)
   {
-    echo "<li>" . htmlspecialchars($problem) . "</li>\n";
+    echo "<li>" . escape_html($problem) . "</li>\n";
   }
   if (!empty($result['violations']['errors']))
   {
@@ -718,7 +718,7 @@ function get_file_details_zip(array $file) : array
       $constants = $reflection->getConstants();
       foreach ($constants as $key => $value)
       {
-        if (($result === $value) && (utf8_strpos($key, 'ER_') === 0))
+        if (($result === $value) && (mb_strpos($key, 'ER_') === 0))
         {
           $error_code = $key;
           break;

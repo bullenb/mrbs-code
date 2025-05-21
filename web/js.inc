@@ -8,7 +8,7 @@ function script_html(string $src, bool $add_version=false) : string
 {
   $html = '<script src="';
   $value = ($add_version) ? add_version($src) : $src;
-  $html .= htmlspecialchars($value);
+  $html .= escape_html($value);
   $html .= "\"></script>\n";
 
   return $html;
@@ -43,7 +43,7 @@ echo script_html(($debug) ? 'jquery/jquery-3.7.1.js' : 'jquery/jquery-3.7.1.min.
 // until we are confident that our JavaScript is not using any features that have
 // been removed.   The uncompressed version will output warnings about removed and
 // deprecated features to the console
-echo script_html(($debug) ? 'jquery/jquery-migrate-3.5.0.js' : 'jquery/jquery-migrate-3.4.0.min.js');
+echo script_html(($debug) ? 'jquery/jquery-migrate-3.5.0.js' : 'jquery/jquery-migrate-3.5.0.min.js');
 
 // We are using the jQuery UI library, which has been custom-built to include the following components:
 //   - Core

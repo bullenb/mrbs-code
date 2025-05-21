@@ -14,6 +14,7 @@ use MRBS\Form\FieldInputSubmit;
 use MRBS\Form\FieldInputText;
 use MRBS\Form\FieldSelect;
 use MRBS\Form\Form;
+use MRBS\Utf8\Utf8String;
 
 
 require "defaultincludes.inc";
@@ -477,72 +478,45 @@ function get_fieldset_submit_buttons() : ElementFieldset
 }
 
 
-// Works out whether the machine architecture is little-endian
-function is_little_endian() : bool
-{
-  static $result;
-
-  if (!isset($result))
-  {
-    $testint = 0x00FF;
-    $p = pack('S', $testint);
-    $result = ($testint===current(unpack('v', $p)));
-  }
-
-  return $result;
-}
-
-
 // Converts a string from the standard MRBS character set to the character set
 // to be used for CSV files
 function csv_conv(string $string) : string
 {
-  $in_charset = utf8_strtoupper(get_charset());
-  $out_charset = utf8_strtoupper(get_csv_charset());
+  $in_charset = mb_strtoupper(get_charset());
+  $out_charset = mb_strtoupper(get_csv_charset());
 
-  // Use iconv() if it exists because it's faster than our own code and also it's
-  // standard (though it has the disadvantage that it adds in BOMs which we have to remove)
-  if (function_exists('iconv'))
+  if ($in_charset == $out_charset)
   {
-    if ($out_charset == 'UTF-16')
-    {
-      // If the endian-ness hasn't been specified, then state it explicitly, because
-      // Windows and Unix will use different defaults on the same architecture.
-      $out_charset .= (is_little_endian()) ? 'LE' : 'BE';
-    }
+    return $string;
+  }
 
-    $result = iconv($in_charset, $out_charset, $string);
-    if ($result === false)
+  if (($in_charset == 'UTF-8') && (str_starts_with($out_charset, 'UTF-16')))
+  {
+    $suffix = substr($out_charset, strlen('UTF-16'));
+
+    switch ($suffix)
     {
-      throw new Exception("iconv() failed converting from '$in_charset' to '$out_charset'");
+      case '':
+        $endianness = null;
+        break;
+      case 'BE':
+        $endianness = System::BIG_ENDIAN;
+        break;
+      case 'LE':
+        $endianness = System::LITTLE_ENDIAN;
+        break;
+      default:
+        throw new Exception("Unsupported charset '$out_charset'.");
+        break;
     }
 
     // iconv() will add in a BOM if the output encoding requires one, but as we are only
     // dealing with parts of a file we don't want any BOMs because we add them separately
     // at the beginning of the file.  So strip off anything that looks like a BOM.
-    $boms = array("\xFE\xFF", "\xFF\xFE");
-    foreach ($boms as $bom)
-    {
-      if (utf8_strpos($result, $bom) === 0)
-      {
-        $result = substr($result, strlen($bom));
-      }
-    }
-  }
-  elseif ($in_charset == $out_charset)
-  {
-    $result = $string;
-  }
-  elseif (($in_charset == 'UTF-8') && ($out_charset == 'UTF-16'))
-  {
-    $result = utf8_to_utf16($string);
-  }
-  else
-  {
-    throw new Exception("Cannot convert from '$in_charset' to '$out_charset'");
+    return (new Utf8String($string))->toUtf16($endianness, true);
   }
 
-  return $result;
+  throw new Exception("Cannot convert from '$in_charset' to '$out_charset'");
 }
 
 
@@ -554,7 +528,7 @@ function escape(string $string) : string
   switch ($output_format)
   {
     case OUTPUT_HTML:
-      $string = mrbs_nl2br(htmlspecialchars($string));
+      $string = mrbs_nl2br(escape_html($string));
       break;
     case OUTPUT_CSV:
       $string = str_replace('"', '""', $string);
@@ -764,7 +738,7 @@ function open_report() : void
     $sort_columns = get_sort_columns($sortby);
     if (!empty($sort_columns))
     {
-      echo ' data-sort-columns="' . htmlspecialchars(json_encode($sort_columns)) . '"';
+      echo ' data-sort-columns="' . escape_html(json_encode($sort_columns)) . '"';
     }
     echo ">\n";
   }
@@ -846,7 +820,7 @@ function output_row(array $values, int $output_format, bool $body_row = true) : 
       $line = '<tr>';
       foreach ($values as $key => $value)
       {
-        $line .= ($body_row) ? '<td>' : '<th id="'. htmlspecialchars("col_$key") . '">';
+        $line .= ($body_row) ? '<td>' : '<th id="'. escape_html("col_$key") . '">';
         $line .= $value;
         $line .= ($body_row) ? '</td>' : '</th>';
         $line .= "\n";
@@ -960,7 +934,9 @@ function report_row(&$rows, $data)
       case 'start_time':
         if ($data['enable_periods'])
         {
-          list( , $date) =  period_date_string($value, $data['area_id']);
+          // If we've fallen through from 'end_time' we need to set previous_period to TRUE
+          // so that we get the name of the previous period, not this one.
+          list( , $date) =  period_date_string($value, $data['area_id'], ($field == 'end_time'));
         }
         else
         {
@@ -1053,7 +1029,7 @@ function report_row(&$rows, $data)
             $user = auth()->getUser($create_by);
             if (isset($user->email) && ($user->email !== ''))
             {
-              $value = '<a href="mailto:' . htmlspecialchars($user->email) . '">' . "$text</a>";
+              $value = '<a href="mailto:' . escape_html($user->email) . '">' . "$text</a>";
             }
           }
           // Put an invisible <span> at the beginning for sorting.
@@ -1069,7 +1045,7 @@ function report_row(&$rows, $data)
           // TODO but we can't do that with Ajax loading.  The solution is to switch to use DataTables'
           // TODO orthogonal data.
           $value = "<span>$value</span>" .
-                   '<a href="' . htmlspecialchars($href) . '"' .
+                   '<a href="' . escape_html($href) . '"' .
                    ' data-id="' . intval($data['id']) . '"' .  // Cast to int as a precaution
                    $value . '">' . $value . '</a>';  // $value already escaped
           break;
@@ -1086,11 +1062,11 @@ function report_row(&$rows, $data)
           break;
         case 'area_name':
           // TODO Use orthogonal data instead of a span
-          $value = '<span>' . htmlspecialchars($data['area_sort_key']) . '</span>' . $value;
+          $value = '<span>' . escape_html($data['area_sort_key']) . '</span>' . $value;
           break;
         case 'room_name':
           // TODO Use orthogonal data instead of a span
-          $value = '<span>' . htmlspecialchars($data['room_sort_key']) . '</span>' . $value;
+          $value = '<span>' . escape_html($data['room_sort_key']) . '</span>' . $value;
           break;
         default:
           break;
@@ -1402,7 +1378,7 @@ function get_match_condition(string $full_column_name, ?string $match, array &$s
   if ($table != 'entry')
   {
     // syntax_caseless_contains() modifies the SQL params array too
-    $sql .= " AND" . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
+    $sql .= " AND " . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
     return $sql;
   }
 
@@ -1421,7 +1397,7 @@ function get_match_condition(string $full_column_name, ?string $match, array &$s
       // We have to use strpos() rather than stripos() because we cannot
       // assume PHP5
       if (($option_key !== '') &&
-          (utf8_strpos(utf8_strtolower($option_value), utf8_strtolower($match)) !== FALSE))
+          (mb_strpos(mb_strtolower($option_value), mb_strtolower($match)) !== FALSE))
       {
         $or_array[] = "$full_column_name=?";
         $sql_params[] = $option_key;
@@ -1458,7 +1434,7 @@ function get_match_condition(string $full_column_name, ?string $match, array &$s
   else
   {
     // syntax_caseless_contains() modifies the SQL params array too
-    $sql .= " AND" . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
+    $sql .= " AND " . db()->syntax_caseless_contains("$full_column_name", $match, $sql_params);
   }
 
   return $sql;

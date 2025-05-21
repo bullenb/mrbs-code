@@ -121,22 +121,6 @@ class Folder {
     /** @var array */
     public array $status;
 
-    /** @var array */
-    public array $attributes = [];
-
-
-    const SPECIAL_ATTRIBUTES = [
-        'haschildren' => ['\haschildren'],
-        'hasnochildren' => ['\hasnochildren'],
-        'template' => ['\template', '\templates'],
-        'inbox' => ['\inbox'],
-        'sent' => ['\sent'],
-        'drafts' => ['\draft', '\drafts'],
-        'archive' => ['\archive', '\archives'],
-        'trash' => ['\trash'],
-        'junk' => ['\junk', '\spam'],
-    ];
-
     /**
      * Folder constructor.
      * @param Client $client
@@ -251,7 +235,7 @@ class Folder {
      */
     protected function decodeName($name): string|array|bool|null {
         $parts = [];
-        foreach(explode($this->delimiter, $name) as $item) {
+        foreach (explode($this->delimiter, $name) as $item) {
             $parts[] = EncodingAliases::convert($item, "UTF7-IMAP");
         }
 
@@ -280,14 +264,6 @@ class Folder {
         $this->marked = in_array('\Marked', $attributes);
         $this->referral = in_array('\Referral', $attributes);
         $this->has_children = in_array('\HasChildren', $attributes);
-
-        array_map(function($el) {
-            foreach(self::SPECIAL_ATTRIBUTES as $key => $attribute) {
-                if(in_array(strtolower($el), $attribute)){
-                    $this->attributes[] = $key;
-                }
-            }
-        }, $attributes);
     }
 
     /**
@@ -308,11 +284,10 @@ class Folder {
     public function move(string $new_name, bool $expunge = true): array {
         $this->client->checkConnection();
         $status = $this->client->getConnection()->renameFolder($this->full_name, $new_name)->validatedData();
-        if($expunge) $this->client->expunge();
+        if ($expunge) $this->client->expunge();
 
         $folder = $this->client->getFolder($new_name);
-        $event = $this->getEvent("folder", "moved");
-        $event::dispatch($this, $folder);
+        $this->dispatch("folder", "moved", $this, $folder);
 
         return $status;
     }
@@ -360,7 +335,7 @@ class Folder {
          * date string that conforms to the rfc2060 specifications for a date_time value or be a Carbon object.
          */
 
-        if($internal_date instanceof Carbon){
+        if ($internal_date instanceof Carbon) {
             $internal_date = $internal_date->format('d-M-Y H:i:s O');
         }
 
@@ -401,14 +376,13 @@ class Folder {
      */
     public function delete(bool $expunge = true): array {
         $status = $this->client->getConnection()->deleteFolder($this->path)->validatedData();
-        if($this->client->getActiveFolder() == $this->path){
+        if ($this->client->getActiveFolder() == $this->path){
             $this->client->setActiveFolder();
         }
 
-        if($expunge) $this->client->expunge();
+        if ($expunge) $this->client->expunge();
 
-        $event = $this->getEvent("folder", "deleted");
-        $event::dispatch($this);
+        $this->dispatch("folder", "deleted", $this);
 
         return $status;
     }
@@ -461,7 +435,7 @@ class Folder {
     public function idle(callable $callback, int $timeout = 300): void {
         $this->client->setTimeout($timeout);
 
-        if(!in_array("IDLE", $this->client->getConnection()->getCapabilities()->validatedData())){
+        if (!in_array("IDLE", $this->client->getConnection()->getCapabilities()->validatedData())) {
             throw new Exceptions\NotSupportedCapabilityException("IMAP server does not support IDLE");
         }
 
@@ -474,15 +448,24 @@ class Folder {
 
         $sequence = $this->client->getConfig()->get('options.sequence', IMAP::ST_MSGN);
 
-        while(true) {
-            // This polymorphic call is fine - Protocol::idle() will throw an exception beforehand
-            $line = $idle_client->getConnection()->nextLine(Response::empty());
+        while (true) {
+            try {
+                // This polymorphic call is fine - Protocol::idle() will throw an exception beforehand
+                $line = $idle_client->getConnection()->nextLine(Response::empty());
+            } catch (Exceptions\RuntimeException $e) {
+                if(strpos($e->getMessage(), "empty response") >= 0 && $idle_client->getConnection()->connected()) {
+                    continue;
+                }
+                if(!str_contains($e->getMessage(), "connection closed")) {
+                    throw $e;
+                }
+            }
 
-            if(($pos = strpos($line, "EXISTS")) !== false){
+            if (($pos = strpos($line, "EXISTS")) !== false) {
                 $msgn = (int)substr($line, 2, $pos - 2);
 
                 // Check if the stream is still alive or should be considered stale
-                if(!$this->client->isConnected() || $last_action->isBefore(Carbon::now())){
+                if (!$this->client->isConnected() || $last_action->isBefore(Carbon::now())) {
                     // Reset the connection before interacting with it. Otherwise, the resource might be stale which
                     // would result in a stuck interaction. If you know of a way of detecting a stale resource, please
                     // feel free to improve this logic. I tried a lot but nothing seem to work reliably...
@@ -509,8 +492,7 @@ class Folder {
                 $message->setSequence($sequence);
                 $callback($message);
 
-                $event = $this->getEvent("message", "new");
-                $event::dispatch($message);
+                $this->dispatch("message", "new", $message);
             }
         }
     }
@@ -606,7 +588,7 @@ class Folder {
      * @param $delimiter
      */
     public function setDelimiter($delimiter): void {
-        if(in_array($delimiter, [null, '', ' ', false]) === true){
+        if (in_array($delimiter, [null, '', ' ', false]) === true) {
             $delimiter = $this->client->getConfig()->get('options.delimiter', '/');
         }
 

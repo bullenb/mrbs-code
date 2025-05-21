@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace MRBS;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use MRBS\ICalendar\RFC5545;
 
 define('INTERVAL_DAY', 0);
@@ -159,13 +160,13 @@ function mrbsCheckFree(array $booking, ?int $ignore_entry_id=null, ?int $ignore_
 
     $query = http_build_query($vars, '', '&');
 
-    $err[] = '<a href="' . htmlspecialchars(multisite('view_entry.php?id=' . $row['id'])) . '">' .
-             htmlspecialchars($row['name']) . '</a>' .
-             ' (' . htmlspecialchars($timestr) . ', ' . htmlspecialchars($row['room_name']) . ') ' .
+    $err[] = '<a href="' . escape_html(multisite('view_entry.php?id=' . $row['id'])) . '">' .
+             escape_html($row['name']) . '</a>' .
+             ' (' . escape_html($timestr) . ', ' . escape_html($row['room_name']) . ') ' .
              '<span>(' .
-             '<a href="' . htmlspecialchars(multisite("index.php?view=day&$query")) . '">' . get_vocab('viewday') . '</a> | ' .
-             '<a href="' . htmlspecialchars(multisite("index.php?view=week&$query")) . '">' . get_vocab('viewweek') . '</a> | ' .
-             '<a href="' . htmlspecialchars(multisite("index.php?view=month&$query")) . '">' . get_vocab('viewmonth') . '</a>' .
+             '<a href="' . escape_html(multisite("index.php?view=day&$query")) . '">' . get_vocab('viewday') . '</a> | ' .
+             '<a href="' . escape_html(multisite("index.php?view=week&$query")) . '">' . get_vocab('viewweek') . '</a> | ' .
+             '<a href="' . escape_html(multisite("index.php?view=month&$query")) . '">' . get_vocab('viewmonth') . '</a>' .
              ')</span>';
   }
 
@@ -560,8 +561,8 @@ function mrbsCheckPolicy(array $booking, ?int $ignore_entry_id=null, ?int $ignor
       if (isset($room_details['invalid_types']) &&
           in_array($booking['type'], $room_details['invalid_types']))
       {
-        // TODO: is this the best place for the htmlspecialchars()?  Should it go closer to the output?
-        $violations[] = get_vocab('type_not_allowed', get_type_vocab($booking['type']), htmlspecialchars($room_details['room_name']));
+        // TODO: is this the best place for the escape_html()?  Should it go closer to the output?
+        $violations[] = get_vocab('type_not_allowed', get_type_vocab($booking['type']), escape_html($room_details['room_name']));
       }
       // ... on this day
       if (!empty($invalid_types_days[$booking['type']]))
@@ -865,7 +866,9 @@ function add_registrants(int $entry_id, array $registrants) : void
 function get_entries_by_area(int $area_id, int $interval_start, int $interval_end) : array
 {
   // The GROUP BY is necessary to get n_registered to work
-  $sql = "SELECT E.*, COUNT(P.entry_id) AS n_registered
+  $sql = "SELECT E.*, " .
+                 db()->syntax_timestamp_to_unix("E.timestamp") . " AS last_updated,
+                 COUNT(P.entry_id) AS n_registered
             FROM " . _tbl('entry') . " E
        LEFT JOIN " . _tbl('room') . " R ON E.room_id = R.id
        LEFT JOIN " . _tbl('participants') . " P ON P.entry_id = E.id
@@ -911,7 +914,9 @@ function get_entries_by_room(int $room_id, ?int $interval_start, ?int $interval_
   $sql_params = [':room_id' => $room_id];
 
   // The GROUP BY is necessary to get n_registered to work
-  $sql = "SELECT E.*, COUNT(P.entry_id) AS n_registered
+  $sql = "SELECT E.*, " .
+                 db()->syntax_timestamp_to_unix("E.timestamp") . " AS last_updated,
+                 COUNT(P.entry_id) AS n_registered
             FROM " . _tbl('entry') . " E
        LEFT JOIN " . _tbl('participants') . " P ON P.entry_id = E.id
            WHERE room_id = :room_id";
@@ -1179,7 +1184,7 @@ function mrbsCreateEntry(string $table, array $data) : int
     // other parts of the code will run without producing PHP or SQL errors but will give
     // the wrong results.   A bit of a crude check, and in due course we probably ought to
     // allow custom fields with spaces in them (or else have custom fields created by MRBS).
-    if (utf8_strpos($key, ' ') !== FALSE)
+    if (mb_strpos($key, ' ') !== FALSE)
     {
       fatal_error("Custom field names cannot contain spaces.");
     }
@@ -1811,7 +1816,7 @@ function get_booking_info(int $id, bool $series, bool $silent=false)
         break;
 
       case 'timestamp':
-        array_push($terms, db()->syntax_timestamp_to_unix("timestamp") . "AS last_updated");
+        array_push($terms, db()->syntax_timestamp_to_unix("timestamp") . " AS last_updated");
         break;
 
       case 'info_time':
@@ -1915,7 +1920,8 @@ function get_booking_info(int $id, bool $series, bool $silent=false)
   {
     $period_names = get_period_names();
     $n_periods = count($period_names[$row['area_id']]);
-    $end_date = new DateTime();
+    $area_details = get_area_details($row['area_id']);
+    $end_date = new DateTime('now', new DateTimeZone($area_details['timezone']));
     $end_date->setTimestamp($row['end_time']);
     $hour = $end_date->getHour();
     // If the time is between midnight and the start of the first period, then
@@ -2100,6 +2106,8 @@ function get_area_names(bool $all=false) : array
 // Returns NULL if $area_id does not exist.
 function get_area_details(int $area_id) : ?array
 {
+  global $area_defaults;
+
   $sql = "SELECT *
             FROM " . _tbl('area') . "
            WHERE id=?
@@ -2114,6 +2122,16 @@ function get_area_details(int $area_id) : ?array
 
   $row = $res->next_row_keyed();
   row_cast_columns($row, 'area');
+
+  // It's possible that the timezone could be NULL on systems upgraded from early versions
+  // of MRBS before the timezone column was in the area table and if the area details have
+  // not been edited since the upgrade.  (The column should have been populated with the
+  // system timezone on upgrade, but wasn't.  It's too complicated to add another upgrade
+  // step to fix this until the roles branch is merged back into main.)
+  if (!isset($row['timezone']))
+  {
+    $row['timezone'] = $area_defaults['timezone'];
+  }
 
   return $row;
 }
@@ -2320,7 +2338,7 @@ function mrbsAddArea($name, &$error)
   }
 
   // Truncate the name field to the maximum length as a precaution.
-  $name = utf8_substr($name, 0, maxlength('area.area_name'));
+  $name = mb_substr($name, 0, maxlength('area.area_name'));
 
   // Insert the area into the database.   We insert the area name that we have
   // been given, together with the default values for the per-area settings.
@@ -2398,8 +2416,8 @@ function mrbsAddRoom($name, $area, &$error, $description='', $capacity='', $room
   }
 
   // Truncate the name and description fields to the maximum length as a precaution.
-  $name = utf8_substr($name, 0, maxlength('room.room_name'));
-  $description = utf8_substr($description, 0, maxlength('room.description'));
+  $name = mb_substr($name, 0, maxlength('room.room_name'));
+  $description = mb_substr($description, 0, maxlength('room.description'));
 
   if (empty($capacity))
   {

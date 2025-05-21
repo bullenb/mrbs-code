@@ -1120,7 +1120,7 @@ $returl = get_form_var('returl', 'string');
 $drag = get_form_var('drag', 'int');
 $start_seconds = get_form_var('start_seconds', 'int');
 $end_seconds = get_form_var('end_seconds', 'int');
-$selected_rooms = get_form_var('rooms', 'array');
+$selected_rooms = get_form_var('rooms', '[int]');
 $start_date = get_form_var('start_date', 'string');
 $end_date = get_form_var('end_date', 'string');
 // And this comes from edit_entry_handler.php
@@ -1459,11 +1459,11 @@ else
     // Set the duration
     if ($enable_periods)
     {
-      $duration = 60;  // one period
+      $duration = ($default_duration_periods ?? 1) * SECONDS_PER_MINUTE;  // One minute is one period
     }
     else
     {
-      $duration = (isset($default_duration)) ? $default_duration : SECONDS_PER_HOUR;
+      $duration = $default_duration ?? SECONDS_PER_HOUR;
     }
 
     // Make sure the duration doesn't exceed the maximum

@@ -24,7 +24,7 @@ function _tbl(string $short_name, bool $include_schema=true) : string
   // other than MySQL, which is one of the few that doesn't support schemas.
   // (Although in practice this means PostgreSQL at the moment, it's possible that
   // in the future support for more databases may be added)
-  if ($include_schema && (utf8_strpos($dbsys, 'mysql') === false) && isset($db_schema))
+  if ($include_schema && (mb_strpos($dbsys, 'mysql') === false) && isset($db_schema))
   {
     $result = $db_schema . '.' . $result;
   }
@@ -49,13 +49,13 @@ function get_table_short_name(string $table) : string
   }
 
   // Strip the prefix off the table name
-  return utf8_substr($result, utf8_strlen($db_tbl_prefix));
+  return mb_substr($result, mb_strlen($db_tbl_prefix));
 }
 
 
 // Convenience wrapper function to provide access to a DB object for
 // default MRBS database
-function db()
+function db() : DB
 {
   global $db_persist, $db_host, $db_login, $db_password,
          $db_database, $db_port, $dbsys, $db_options;
@@ -87,8 +87,24 @@ function db()
   }
   catch (\Exception $e)
   {
-    $db_obj = DBFactory::create($dbsys, $db_host, $db_login, $db_password,
-                                $db_database, (bool) $db_persist, $db_port, $db_options);
+    try
+    {
+      $db_obj = DBFactory::create(
+        $dbsys,
+        $db_host,
+        $db_login,
+        $db_password,
+        $db_database,
+        (bool)$db_persist,
+        $db_port,
+        $db_options
+      );
+    }
+    catch (\Exception $e)
+    {
+      trigger_error($e->getMessage(), E_USER_WARNING);
+      fatal_error(get_vocab('fatal_db_error'));
+    }
   }
 
   return $db_obj;
@@ -96,36 +112,16 @@ function db()
 
 
 // Returns the db schema version as recorded in the database.   If there is no version
-// recorded then returns 0.
-function db_schema_version() : int
+// recorded then returns 0.  If $local is true then the local db schema version is returned.
+function db_schema_version(DB $handle, bool $local=false) : int
 {
-  if (db()->table_exists(_tbl('variables')))
+  if ($handle->table_exists(_tbl('variables')))
   {
+    $sql_params = [':variable_name' => ($local) ? 'local_db_version' : 'db_version'];
     $sql = "SELECT variable_content
               FROM " . _tbl('variables') . "
-             WHERE variable_name = 'db_version'";
-    $result = db()->query1($sql);
-  }
-  else
-  {
-    // Default version is 0, before we had schema versions
-    $result = 0;
-  }
-
-  return max($result, 0);
-}
-
-
-// Returns the local db schema version as recorded in the database.   If there is no version
-// recorded then returns 0.
-function db_schema_version_local() : int
-{
-  if (db()->table_exists(_tbl('variables')))
-  {
-    $sql = "SELECT variable_content
-              FROM " . _tbl('variables') . "
-             WHERE variable_name = 'local_db_version'";
-    $result = db()->query1($sql);
+             WHERE variable_name=:variable_name";
+    $result = $handle->query1($sql, $sql_params);
   }
   else
   {

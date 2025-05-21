@@ -4,6 +4,7 @@ namespace MRBS;
 
 use PDO;
 use PDOException;
+use Throwable;
 
 
 abstract class DB
@@ -46,11 +47,49 @@ abstract class DB
       // Rollback any outstanding transactions
       $this->rollback();
     }
-    catch (\Exception $e) {
-      // Don't do anything.  This is the destructor and if we get an exception
-      // it's probably because the connection has been lost or timed out, in which
-      // case the locks will have been released and the transaction rolled back anyway.
+    catch (Throwable $e) {
+      // Don't do anything, except raise an error.  This is the destructor and if we get an
+      // exception or error it's probably because the connection has been lost or timed out,
+      // in which case the locks will have been released and the transaction rolled back anyway.
+      trigger_error($e->getMessage(), E_USER_NOTICE);
     }
+  }
+
+
+  // Build a DSN.
+  // The SensitiveParameter attribute needs to be on a separate line for PHP 7.
+  // The attribute is only recognised by PHP 8.2 and later.
+  public static function dsn(
+    string $db_host,
+    #[\SensitiveParameter]
+    string $db_name,
+    ?int   $db_port = null
+  ) : string
+  {
+    // Early error handling
+    if (is_null(static::DB_DBO_DRIVER) ||
+        is_null(static::DB_DEFAULT_PORT)) {
+      throw new Exception("Encountered a fatal bug in DB abstraction code!");
+    }
+
+    // Prefix
+    $result = static::DB_DBO_DRIVER . ':';
+
+    // Host
+    if ($db_host !== '') {
+      $result .= 'host=' . $db_host . ';';
+    }
+
+    // Port
+    if (empty($db_port)) {
+      $db_port = static::DB_DEFAULT_PORT;
+    }
+    $result .= 'port=' . $db_port . ';';
+
+    // Database name
+    $result .= 'dbname=' . $db_name;
+
+    return $result;
   }
 
 
@@ -71,25 +110,7 @@ abstract class DB
     ?array $driver_options = null
   ): void
   {
-    // Early error handling
-    if (is_null(static::DB_DBO_DRIVER) ||
-      is_null(static::DB_DEFAULT_PORT)) {
-      throw new Exception("Encountered a fatal bug in DB abstraction code!");
-    }
-
-    // If no port has been provided, set a SQL variant dependent default
-    if (empty($db_port)) {
-      $db_port = static::DB_DEFAULT_PORT;
-    }
-
     // Establish a database connection.
-    if (!isset($db_host) || ($db_host == "")) {
-      $hostpart = "";
-    }
-    else {
-      $hostpart = "host=$db_host;";
-    }
-
     $default_options = array(
       PDO::ATTR_PERSISTENT => $persist,
       PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
@@ -98,7 +119,7 @@ abstract class DB
     $options = (empty($driver_options)) ? $default_options : $driver_options + $default_options;
 
     $this->dbh = new PDO(
-      static::DB_DBO_DRIVER . ":{$hostpart}port=$db_port;dbname=$db_name",
+      static::dsn($db_host, $db_name, $db_port),
       $db_username,
       $db_password,
       $options
@@ -106,13 +127,6 @@ abstract class DB
     $this->command("SET NAMES '" . static::DB_CHARSET . "'");
   }
 
-
-  // Output our own message to avoid giving away the database credentials
-  protected function connectError(string $message): void
-  {
-    trigger_error($message, E_USER_WARNING);
-    fatal_error(get_vocab('fatal_db_error'));
-  }
 
   //
   public function error(): string

@@ -60,7 +60,7 @@ class DB_pgsql extends DB
       {
         $message .= ".\n[MRBS note] Try setting " . '$db_host' . " to '127.0.0.1'.";
       }
-      $this->connectError($message);
+      throw new DBException($message);
     }
   }
 
@@ -71,7 +71,7 @@ class DB_pgsql extends DB
   // 'table_schema' can be NULL
   private static function resolve_table(string $table) : array
   {
-    if (utf8_strpos($table, '.') === false)
+    if (mb_strpos($table, '.') === false)
     {
       $table_schema = null;
       $table_name = $table;
@@ -365,7 +365,7 @@ class DB_pgsql extends DB
         $length = $row['character_octet_length'];
       }
       // Convert the is_nullable field to a boolean
-      $is_nullable = (utf8_strtolower($row['is_nullable']) == 'yes');
+      $is_nullable = (mb_strtolower($row['is_nullable']) == 'yes');
 
       $fields[] = array(
         'name' => $name,
@@ -385,7 +385,7 @@ class DB_pgsql extends DB
   // Generate non-standard SQL for LIMIT clauses:
   public function syntax_limit(int $count, int $offset) : string
   {
-    return " LIMIT $count OFFSET $offset ";
+    return "LIMIT $count OFFSET $offset";
   }
 
 
@@ -396,7 +396,7 @@ class DB_pgsql extends DB
     // to the nearest integer.  Note that ROUND still returns a float type
     // even though the value is an integer, so we need to cast it as well.
     // (But the casting may round as well?  If so the round is redundant.)
-    return " CAST(ROUND(DATE_PART('epoch', $fieldname)) AS integer) ";
+    return "CAST(ROUND(DATE_PART('epoch', $fieldname)) AS integer)";
   }
 
 
@@ -412,7 +412,7 @@ class DB_pgsql extends DB
   {
     $params[] = $string;
 
-    return " " . $this->quote($fieldname) . "=?";
+    return $this->quote($fieldname) . "=?";
   }
 
 
@@ -428,7 +428,7 @@ class DB_pgsql extends DB
   {
     $params[] = quotemeta($string);
 
-    return " $fieldname ~* ? ";
+    return "$fieldname ~* ?";
   }
 
 

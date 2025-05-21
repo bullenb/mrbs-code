@@ -1,18 +1,24 @@
 <?php
+declare(strict_types=1);
 namespace MRBS;
 
 // Returns a string containing a single line of data details, or if $as_html is set
 // a table row of details.   The first column is the $label and the second column
 // the $value.   $class is an optional class name which can be applied to the
 // second column.  If $email is set then the $value will be turned into a mailto: link.
-function create_details_row(string $label, ?string $value, bool $as_html=false, string $class='', ?string $email=null) : string
+// $value can be of type null|int|float|string (union declarations are not supported until PHP 8.0).
+function create_details_row(string $label, $value, bool $as_html=false, string $class='', ?string $email=null) : string
 {
   $value = $value ?? '';
   $result = '';
 
   if ($as_html)
   {
-    $escaped_value = mrbs_nl2br(htmlspecialchars($value));
+    $escaped_value = escape_html($value);
+    if (is_string($escaped_value))
+    {
+      $escaped_value = mrbs_nl2br($escaped_value);
+    }
     $result .= "<tr>\n";
     $result .= "<td>$label</td>\n";
     $result .= "<td" . ((!empty($class)) ? " class=\"$class\"" : '') . '>';
@@ -65,7 +71,7 @@ function create_details_body(array $data, bool $as_html=false, bool $keep_privat
 
   // Go through each of the columns and for each of them that can be made private
   // substitute the private text if the user is not allowed to see the data
-  $private_text = "[" . get_vocab("unavailable") . "]";
+  $private_text = get_vocab("unavailable");
 
   foreach ($data as $key => $value)
   {
@@ -101,8 +107,11 @@ function create_details_body(array $data, bool $as_html=false, bool $keep_privat
         }
         else
         {
-          $user = auth()->getUser($data[$key]);
-          $data[$key] = (isset($user)) ? $user->display_name : '';
+          $user = auth()->getUser($value);
+          if (isset($user))
+          {
+            $data[$key] = $user->display_name;
+          }
         }
         // Add in the email address if there is one and we are allowed to
         if (!isset($user) ||

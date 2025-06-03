@@ -3,6 +3,7 @@
 web/config.inc.php.*
 web/css/custom.css
 web/config.inc.php
+docker_app/php/config.inc.php
 
 /.settings
 /.project

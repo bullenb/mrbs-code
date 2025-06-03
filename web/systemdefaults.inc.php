@@ -390,6 +390,9 @@ $prevent_booking_on_holidays = true;
 // Set this to true to prevent bookings being made on weekends (see $weekdays).
 $prevent_booking_on_weekends = false;
 
+// The number of minutes before the start of a booking that a user can create a booking.
+$meeting_buffer = 0;
+
 
 /******************
  * Display settings

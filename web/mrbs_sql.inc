@@ -473,6 +473,7 @@ function mrbsCheckPolicy(array $booking, ?int $ignore_entry_id=null, ?int $ignor
   global $prevent_simultaneous_bookings, $prevent_invalid_types, $invalid_types_days;
   global $prevent_booking_on_holidays, $prevent_booking_on_weekends;
   global $periods_booking_opens, $measure_max_to_start_time;
+  global $meeting_buffer;
 
   $result = array('notices' => array(),
                   'errors'  => array());
@@ -634,6 +635,21 @@ function mrbsCheckPolicy(array $booking, ?int $ignore_entry_id=null, ?int $ignor
         'latest_booking_date',
         datetime_format($datetime_formats['date'], $date_immutable->getTimestamp())
       );
+    }
+  }
+
+  if ($meeting_buffer > 0)
+  {
+    $buffer_start = $booking['start_time'] - $meeting_buffer;
+    $buffer_end = $booking['end_time'] + $meeting_buffer;
+
+    if ($buffer_start < $now)
+    {
+      $violations[] = get_vocab('meeting_buffer', datetime_format($datetime_formats['date'], $buffer_start));
+    }
+    if ($buffer_end > $now)
+    {
+      $violations[] = get_vocab('meeting_buffer', datetime_format($datetime_formats['date'], $buffer_end));
     }
   }
 

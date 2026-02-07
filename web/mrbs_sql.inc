@@ -638,18 +638,39 @@ function mrbsCheckPolicy(array $booking, ?int $ignore_entry_id=null, ?int $ignor
     }
   }
 
-  if ($meeting_buffer > 0)
+  // Check for meeting buffer violations
+  // The buffer is applied between meetings, so we check for any existing bookings
+  // that overlap with the extended period (start - buffer to end + buffer).
+  if (isset($meeting_buffer) && ($meeting_buffer > 0))
   {
     $buffer_start = $booking['start_time'] - $meeting_buffer;
-    $buffer_end = $booking['end_time'] + $meeting_buffer;
+    $buffer_end   = $booking['end_time'] + $meeting_buffer;
 
-    if ($buffer_start < $now)
+    $sql = "SELECT id
+              FROM " . _tbl('entry') . "
+              WHERE start_time < ?
+                AND end_time > ?
+                AND room_id = ?";
+
+    $sql_params = array($buffer_end, $buffer_start, $booking['room_id']);
+
+    if (isset($ignore_entry_id))
     {
-      $violations[] = get_vocab('meeting_buffer', datetime_format($datetime_formats['date'], $buffer_start));
+      $sql .= " AND id <> ?";
+      $sql_params[] = $ignore_entry_id;
     }
-    if ($buffer_end > $now)
+
+    if (isset($ignore_repeat_id))
     {
-      $violations[] = get_vocab('meeting_buffer', datetime_format($datetime_formats['date'], $buffer_end));
+      $sql .= " AND (repeat_id IS NULL OR repeat_id <> ?)";
+      $sql_params[] = $ignore_repeat_id;
+    }
+
+    $res = db()->query($sql, $sql_params);
+
+    if ($res->count() > 0)
+    {
+      $violations[] = get_vocab('meeting_buffer');
     }
   }
 

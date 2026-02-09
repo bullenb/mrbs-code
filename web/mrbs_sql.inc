@@ -641,7 +641,7 @@ function mrbsCheckPolicy(array $booking, ?int $ignore_entry_id=null, ?int $ignor
   // Check for meeting buffer violations
   // The buffer is applied between meetings, so we check for any existing bookings
   // that overlap with the extended period (start - buffer to end + buffer).
-  if (isset($meeting_buffer) && ($meeting_buffer > 0))
+  if (!$delete && isset($meeting_buffer) && ($meeting_buffer > 0))
   {
     $buffer_start = $booking['start_time'] - $meeting_buffer;
     $buffer_end   = $booking['end_time'] + $meeting_buffer;
